@@ -37,6 +37,15 @@ struct User<'a> {
     host: &'a str,
 }
 
+enum Event {
+    CMD,
+    CONNECTED,
+    PING,
+    PRIVMSG,
+    QUIT,
+    UNKNOWN
+}
+
 fn debug(msg: String) {
     if DEBUG {
         println!("___ {}", msg);
@@ -76,7 +85,7 @@ fn split_hostmask(s: &str) -> User {
     }
 }
 
-// From https://github.com/mattnenterprise/rust-pop3
+// Adapted from https://github.com/mattnenterprise/rust-pop3/blob/20acb17197a7553d5a664725fe96df9fa5d042fd/src/pop3.rs
 fn read_response(stream: &mut TcpStream) -> Vec<String> {
     //Carriage return
     let cr = 0x0d;
@@ -107,7 +116,7 @@ fn read_response(stream: &mut TcpStream) -> Vec<String> {
 
 fn send_raw(stream: &mut TcpStream, msg: &String) -> Result<(), Error> {
     let sent = stream.write_fmt(format_args!("{}", msg));
-    println!("S {:?} {:?}", msg, sent);
+    debug(format!("S {:?} {:?}", msg, sent));
 
     sent
 }
@@ -132,7 +141,7 @@ fn send_quit(stream: &mut TcpStream, msg: &str) {
     let _ = send_raw(stream, &(format!("QUIT :{}\n", msg)));
 }
 
-fn connect(host: &str, port: i32) {
+fn handle_line(stream: &mut TcpStream, line: &str) -> Event {
     let event_priv = format!(":(.*) PRIVMSG {} :(.*)\r\n", NICKNAME);
     let event_ping = r"^PING\s+:(.*)";
     let event_motd = ".*End of MOTD command.*";
@@ -141,52 +150,76 @@ fn connect(host: &str, port: i32) {
     let re_ping = Regex::new(&event_ping[..]).unwrap();
     let re_priv = Regex::new(&event_priv[..]).unwrap();
 
+    if re_motd.is_match(line) {
+        debug(format!("CONNECTED"));
+        thread::sleep_ms(1000);
+
+        send_privmsg(stream, ADMIN, MSG_GREET);
+
+        return Event::CONNECTED;
+    } else if re_ping.is_match(line) {
+        let payload = re_ping.captures(line).unwrap().at(1).unwrap();
+        debug(format!("PONG {}", payload));
+        send_pong(stream, payload);
+
+        return Event::PING;
+    } else if re_priv.is_match(line) {
+        let caps   = re_priv.captures(line).unwrap();
+        let sender = caps.at(1).unwrap();
+        let msg    = caps.at(2).unwrap();
+        let user   = split_hostmask(sender);
+
+        if msg.chars().nth(0) == CMD_PREFIX.chars().nth(0) {
+            if msg == CMD_PREFIX.to_string() + CMD_QUIT {
+                if user.nick == ADMIN {
+                    debug(format!("EXITING"));
+                    send_privmsg(stream, user.nick, MSG_IQUIT);
+
+                    return Event::QUIT;
+                } else {
+                    send_privmsg(stream, user.nick, MSG_NOPE);
+                }
+            } else {
+                debug(format!("CMD {} {}", sender, msg));
+            }
+
+            return Event::CMD;
+        } else {
+            debug(format!("PRIVMSG {} {}", sender, msg));
+
+            return Event::PRIVMSG;
+        }
+    }
+    return Event::UNKNOWN;
+}
+
+fn connect(host: &str, port: i32) {
     let conn_string = format!("{}:{}", host, port);
     let mut tcp_stream = TcpStream::connect(&conn_string[..]).unwrap();
 
     let mut rcvd;
-    rcvd = read_response(&mut tcp_stream);
-    println!("R {:?}", rcvd);
-
-    send_nick(&mut tcp_stream, NICKNAME);
-    send_user(&mut tcp_stream, USERNAME, USERMODE, REALNAME);
+    let mut initialized = false;
 
     loop {
         rcvd = read_response(&mut tcp_stream);
         let line = &rcvd[0][..];
-        println!("R {:?}", line);
+        debug(format!("R {:?}", line));
 
-        if re_motd.is_match(line) {
-            debug(format!("CONNECTED"));
-            thread::sleep_ms(1000);
+        if !initialized {
+            send_nick(&mut tcp_stream, NICKNAME);
+            send_user(&mut tcp_stream, USERNAME, USERMODE, REALNAME);
+            initialized = true;
+            continue;
+        }
 
-            send_privmsg(&mut tcp_stream, ADMIN, MSG_GREET);
-        } else if re_ping.is_match(line) {
-            let payload = re_ping.captures(line).unwrap().at(1).unwrap();
-            debug(format!("PONG {}", payload));
-            send_pong(&mut tcp_stream, payload);
-        } else if re_priv.is_match(line) {
-            let caps   = re_priv.captures(line).unwrap();
-            let sender = caps.at(1).unwrap();
-            let msg    = caps.at(2).unwrap();
-            let user   = split_hostmask(sender);
-
-            if msg.chars().nth(0) == CMD_PREFIX.chars().nth(0) {
-                if msg == CMD_PREFIX.to_string() + CMD_QUIT {
-                    if user.nick == ADMIN {
-                        debug(format!("EXITING"));
-                        send_privmsg(&mut tcp_stream, user.nick, MSG_IQUIT);
-                        // shutting down
-                        break;
-                    } else {
-                        send_privmsg(&mut tcp_stream, user.nick, MSG_NOPE);
-                    }
-                } else {
-                    debug(format!("CMD {} {}", sender, msg));
-                }
-            } else {
-                debug(format!("PRIVMSG {} {}", sender, msg));
-            }
+        let event = handle_line(&mut tcp_stream, line);
+        match event {
+            Event::QUIT => {
+                debug(format!("Event::QUIT");
+                break
+            },
+            Event::CONNECTED => debug(format!("Event::CONNECTED")),
+            _ => ()
         }
     }
 
