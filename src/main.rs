@@ -4,28 +4,43 @@ extern crate regex;
 use getopts::Options;
 use regex::Regex;
 use std::env;
-use std::io::{Read,Write};
+use std::io::{Error,Read,Write};
 use std::net::TcpStream;
 use std::thread;
 
+// General config stuff
 static VERSION: &'static str = "0.1.0";
 static NAME   : &'static str = "Cerith";
 static ADMIN  : &'static str = "wink";
+static DEBUG  : bool = true;
 
+// IRC config stuff
 static NICKNAME: &'static str = "Cerith";
 static REALNAME: &'static str = "Cerith";
 static USERNAME: &'static str = "Cerith";
 static USERMODE: i32 = 8;
+static DEFAULT_PORT: i32 = 6667;
 
+// Messages to be sent.
 static MSG_QUIT : &'static str = "Fin.";
 static MSG_GREET: &'static str = "Hello World!";
+static MSG_IQUIT: &'static str = ":(";
+static MSG_NOPE: &'static str = "You're not the boss of me.";
 
-static DEFAULT_PORT: i32 = 6667;
+// Commands that are recognized
+static CMD_PREFIX: &'static str = "!";
+static CMD_QUIT: &'static str = "quit";
 
 struct User<'a> {
     nick: &'a str,
     ident: &'a str,
     host: &'a str,
+}
+
+fn debug(msg: String) {
+    if DEBUG {
+        println!("___ {}", msg);
+    }
 }
 
 fn print_usage(program: &str, opts: Options) {
@@ -45,6 +60,20 @@ fn parse_int(s: String) -> i32 {
     };
 
     return num;
+}
+
+fn split_hostmask(s: &str) -> User {
+    let re = Regex::new(r"^(.*)!(.*)@(.*)").unwrap();
+    if re.is_match(s) {
+        let x = re.captures(s).unwrap();
+        let nick = x.at(1).unwrap();
+        let ident = x.at(2).unwrap();
+        let host = x.at(3).unwrap();
+
+        return User{nick:nick, ident:ident, host:host};
+    } else {
+        panic!("Cannot parse host mask: {}", s);
+    }
 }
 
 // From https://github.com/mattnenterprise/rust-pop3
@@ -76,40 +105,34 @@ fn read_response(stream: &mut TcpStream) -> Vec<String> {
     all
 }
 
-fn split_hostmask(s: &str) -> User {
-    let re = Regex::new(r"^(.*)!(.*)@(.*)").unwrap();
-    if re.is_match(s) {
-        let x = re.captures(s).unwrap();
-        let nick = x.at(1).unwrap();
-        let ident = x.at(2).unwrap();
-        let host = x.at(3).unwrap();
-
-        return User{nick:nick, ident:ident, host:host};
-    } else {
-        panic!("Cannot parse host mask: {}", s);
-    }
-}
-
-fn send_raw(stream: &mut TcpStream, msg: &String) {
+fn send_raw(stream: &mut TcpStream, msg: &String) -> Result<(), Error> {
     let sent = stream.write_fmt(format_args!("{}", msg));
     println!("S {:?} {:?}", msg, sent);
+
+    sent
 }
 
 fn send_privmsg(stream: &mut TcpStream, to: &str, msg: &str) {
-    send_raw(stream, &(format!("PRIVMSG {} :{}\n", to, msg)));
+    let _ = send_raw(stream, &(format!("PRIVMSG {} :{}\n", to, msg)));
 }
 
 fn send_pong(stream: &mut TcpStream, msg: &str) {
-    send_raw(stream, &(format!("PRIVMSG :{}\n", msg)));
+    let _ = send_raw(stream, &(format!("PONG :{}\n", msg)));
+}
+
+fn send_nick(stream: &mut TcpStream, msg: &str) {
+    let _ = send_raw(stream, &(format!("NICK :{}\n", msg)));
+}
+
+fn send_user(stream: &mut TcpStream, name: &str, mode: i32, realname: &str) {
+    let _ = send_raw(stream, &(format!("USER {} {} * :{}\n", name, mode, realname)));
+}
+
+fn send_quit(stream: &mut TcpStream, msg: &str) {
+    let _ = send_raw(stream, &(format!("QUIT :{}\n", msg)));
 }
 
 fn connect(host: &str, port: i32) {
-    let cmd_nick = format!("NICK {}\n", NICKNAME);
-    let cmd_user = format!("USER {} {} * :{}\n",
-            USERNAME, USERMODE, REALNAME);
-    let cmd_quit = format!("QUIT :{}.\n", MSG_QUIT);
-    let cmd_greet = format!("PRIVMSG {} :{}!\n", ADMIN, MSG_GREET);
-
     let event_priv = format!(":(.*) PRIVMSG {} :(.*)\r\n", NICKNAME);
     let event_ping = r"^PING\s+:(.*)";
     let event_motd = ".*End of MOTD command.*";
@@ -125,11 +148,8 @@ fn connect(host: &str, port: i32) {
     rcvd = read_response(&mut tcp_stream);
     println!("R {:?}", rcvd);
 
-    let mut sent;
-    sent = tcp_stream.write_fmt(format_args!("{}", cmd_nick));
-    println!("S {:?} {:?}", cmd_nick, sent);
-    sent = tcp_stream.write_fmt(format_args!("{}", cmd_user));
-    println!("S {:?} {:?}", cmd_user, sent);
+    send_nick(&mut tcp_stream, NICKNAME);
+    send_user(&mut tcp_stream, USERNAME, USERMODE, REALNAME);
 
     loop {
         rcvd = read_response(&mut tcp_stream);
@@ -137,14 +157,13 @@ fn connect(host: &str, port: i32) {
         println!("R {:?}", line);
 
         if re_motd.is_match(line) {
-            println!("__ CONNECTED");
+            debug(format!("CONNECTED"));
             thread::sleep_ms(1000);
 
-            send_raw(&mut tcp_stream, &cmd_greet);
+            send_privmsg(&mut tcp_stream, ADMIN, MSG_GREET);
         } else if re_ping.is_match(line) {
             let payload = re_ping.captures(line).unwrap().at(1).unwrap();
-            println!("__ PONG {}", payload);
-            //send_raw(&mut tcp_stream, &(format!("PONG :{}\n", payload)));
+            debug(format!("PONG {}", payload));
             send_pong(&mut tcp_stream, payload);
         } else if re_priv.is_match(line) {
             let caps   = re_priv.captures(line).unwrap();
@@ -152,25 +171,29 @@ fn connect(host: &str, port: i32) {
             let msg    = caps.at(2).unwrap();
             let user   = split_hostmask(sender);
 
-            if msg == "quit" {
-                if user.nick == ADMIN {
-                    println!("__ EXITING");
-                    send_privmsg(&mut tcp_stream, user.nick, ":(");
-                    break;
+            if msg.chars().nth(0) == CMD_PREFIX.chars().nth(0) {
+                if msg == CMD_PREFIX.to_string() + CMD_QUIT {
+                    if user.nick == ADMIN {
+                        debug(format!("EXITING"));
+                        send_privmsg(&mut tcp_stream, user.nick, MSG_IQUIT);
+                        // shutting down
+                        break;
+                    } else {
+                        send_privmsg(&mut tcp_stream, user.nick, MSG_NOPE);
+                    }
                 } else {
-                    send_privmsg(&mut tcp_stream, user.nick, "You're not the boss of me.");
+                    debug(format!("CMD {} {}", sender, msg));
                 }
             } else {
-                println!("__ PRIVMSG {} {}", sender, msg);
+                debug(format!("PRIVMSG {} {}", sender, msg));
             }
         }
-
     }
 
     // shutting down
-    thread::sleep_ms(1000);
-    sent = tcp_stream.write_fmt(format_args!("{}", cmd_quit));
-    println!("S {:?} {:?}", cmd_quit, sent);
+    thread::sleep_ms(200);
+    send_quit(&mut tcp_stream, MSG_QUIT);
+    println!("");
 }
 
 fn main() {
