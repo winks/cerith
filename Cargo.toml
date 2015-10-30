@@ -1,0 +1,7 @@
+[package]
+name = "cerith"
+version = "0.1.0"
+authors = ["Florian Anderiasch <fa@art-core.org>"]
+[dependencies]
+getopts = "0.2"
+regex = "0.1.41"
