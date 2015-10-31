@@ -25,11 +25,13 @@ static DEFAULT_PORT: i32 = 6667;
 static MSG_QUIT : &'static str = "Fin.";
 static MSG_GREET: &'static str = "Hello World!";
 static MSG_IQUIT: &'static str = ":(";
-static MSG_NOPE: &'static str = "You're not the boss of me.";
+static MSG_NOPE : &'static str = "You're not the boss of me.";
 
 // Commands that are recognized
 static CMD_PREFIX: &'static str = "!";
 static CMD_QUIT: &'static str = "quit";
+static CMD_JOIN: &'static str = "join";
+static CMD_PART: &'static str = "part";
 
 struct User<'a> {
     nick: &'a str,
@@ -85,6 +87,13 @@ fn split_hostmask(s: &str) -> User {
     }
 }
 
+fn is_command(input: &str, command: &str) -> bool {
+    let full = CMD_PREFIX.to_string() + command;
+    let len = full.len();
+
+    return input == full || &input[0..len] == full;
+}
+
 // Adapted from https://github.com/mattnenterprise/rust-pop3/blob/20acb17197a7553d5a664725fe96df9fa5d042fd/src/pop3.rs
 fn read_response(stream: &mut TcpStream) -> Vec<String> {
     //Carriage return
@@ -121,16 +130,28 @@ fn send_raw(stream: &mut TcpStream, msg: &String) -> Result<(), Error> {
     sent
 }
 
-fn send_privmsg(stream: &mut TcpStream, to: &str, msg: &str) {
-    let _ = send_raw(stream, &(format!("PRIVMSG {} :{}\n", to, msg)));
+fn send_join(stream: &mut TcpStream, channel: &str) {
+    let _ = send_raw(stream, &(format!("JOIN {}\n", channel)));
+}
+
+fn send_nick(stream: &mut TcpStream, msg: &str) {
+    let _ = send_raw(stream, &(format!("NICK :{}\n", msg)));
+}
+
+fn send_part(stream: &mut TcpStream, channel: &str, msg: &str) {
+    if msg.len() > 0 {
+        let _ = send_raw(stream, &(format!("PART {} :{}\n", channel, msg)));
+    } else {
+        let _ = send_raw(stream, &(format!("PART {}\n", channel)));
+    }
 }
 
 fn send_pong(stream: &mut TcpStream, msg: &str) {
     let _ = send_raw(stream, &(format!("PONG :{}\n", msg)));
 }
 
-fn send_nick(stream: &mut TcpStream, msg: &str) {
-    let _ = send_raw(stream, &(format!("NICK :{}\n", msg)));
+fn send_privmsg(stream: &mut TcpStream, to: &str, msg: &str) {
+    let _ = send_raw(stream, &(format!("PRIVMSG {} :{}\n", to, msg)));
 }
 
 fn send_user(stream: &mut TcpStream, name: &str, mode: i32, realname: &str) {
@@ -143,12 +164,20 @@ fn send_quit(stream: &mut TcpStream, msg: &str) {
 
 fn handle_line(stream: &mut TcpStream, line: &str) -> Event {
     let event_priv = format!(":(.*) PRIVMSG {} :(.*)\r\n", NICKNAME);
-    let event_ping = r"^PING\s+:(.*)";
+    let event_ping = "^PING\\s+:(.*)";
     let event_motd = ".*End of MOTD command.*";
 
     let re_motd = Regex::new(&event_motd[..]).unwrap();
     let re_ping = Regex::new(&event_ping[..]).unwrap();
     let re_priv = Regex::new(&event_priv[..]).unwrap();
+
+    let event_cmd_join = format!("{}{}\\s+(.*)", CMD_PREFIX, CMD_JOIN);
+    let event_cmd_part = format!("{}{}\\s+(\\S+)(\\s+)?(.*)?", CMD_PREFIX, CMD_PART);
+    let event_cmd_quit = format!("{}{}(\\s+)?(.*)?", CMD_PREFIX, CMD_QUIT);
+
+    let re_cmd_join = Regex::new(&event_cmd_join[..]).unwrap();
+    let re_cmd_part = Regex::new(&event_cmd_part[..]).unwrap();
+    let re_cmd_quit = Regex::new(&event_cmd_quit[..]).unwrap();
 
     if re_motd.is_match(line) {
         debug(format!("CONNECTED"));
@@ -169,23 +198,37 @@ fn handle_line(stream: &mut TcpStream, line: &str) -> Event {
         let msg    = caps.at(2).unwrap();
         let user   = split_hostmask(sender);
 
+        // these are the bot commands with prefix
         if msg.chars().nth(0) == CMD_PREFIX.chars().nth(0) {
-            if msg == CMD_PREFIX.to_string() + CMD_QUIT {
+            if is_command(msg, CMD_QUIT) {
                 if user.nick == ADMIN {
-                    debug(format!("EXITING"));
+                    let caps_cmd = re_cmd_quit.captures(msg).unwrap();
+                    let quit_msg = caps_cmd.at(2).unwrap_or("");
+                    debug(format!("EXITING {}", quit_msg));
                     send_privmsg(stream, user.nick, MSG_IQUIT);
 
                     return Event::QUIT;
                 } else {
                     send_privmsg(stream, user.nick, MSG_NOPE);
                 }
+            } else if is_command(msg, CMD_JOIN) {
+                let caps_cmd = re_cmd_join.captures(msg).unwrap();
+                let channel  = caps_cmd.at(1).unwrap();
+                debug(format!("JOIN {}|{}|{}", sender, msg, channel));
+                send_join(stream, channel);
+            } else if is_command(msg, CMD_PART) {
+                let caps_cmd = re_cmd_part.captures(msg).unwrap();
+                let channel  = caps_cmd.at(1).unwrap();
+                let part_msg = caps_cmd.at(3).unwrap_or("");
+                debug(format!("PART {}|{}|{}|{}", sender, msg, channel, part_msg));
+                send_part(stream, channel, part_msg);
             } else {
-                debug(format!("CMD {} {}", sender, msg));
+                debug(format!("CMD {}|{}", sender, msg));
             }
 
             return Event::CMD;
         } else {
-            debug(format!("PRIVMSG {} {}", sender, msg));
+            debug(format!("PRIVMSG {}|{}", sender, msg));
 
             return Event::PRIVMSG;
         }
@@ -215,7 +258,7 @@ fn connect(host: &str, port: i32) {
         let event = handle_line(&mut tcp_stream, line);
         match event {
             Event::QUIT => {
-                debug(format!("Event::QUIT");
+                debug(format!("Event::QUIT"));
                 break
             },
             Event::CONNECTED => debug(format!("Event::CONNECTED")),
