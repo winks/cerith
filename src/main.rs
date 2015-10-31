@@ -32,6 +32,7 @@ static CMD_PREFIX: &'static str = "!";
 static CMD_QUIT: &'static str = "quit";
 static CMD_JOIN: &'static str = "join";
 static CMD_PART: &'static str = "part";
+static CMD_SAY : &'static str = "say";
 
 struct User<'a> {
     nick: &'a str,
@@ -174,10 +175,12 @@ fn handle_line(stream: &mut TcpStream, line: &str) -> Event {
     let event_cmd_join = format!("{}{}\\s+(.*)", CMD_PREFIX, CMD_JOIN);
     let event_cmd_part = format!("{}{}\\s+(\\S+)(\\s+)?(.*)?", CMD_PREFIX, CMD_PART);
     let event_cmd_quit = format!("{}{}(\\s+)?(.*)?", CMD_PREFIX, CMD_QUIT);
+    let event_cmd_say  = format!("{}{}\\s+(\\S+)\\s+(.+)", CMD_PREFIX, CMD_SAY);
 
     let re_cmd_join = Regex::new(&event_cmd_join[..]).unwrap();
     let re_cmd_part = Regex::new(&event_cmd_part[..]).unwrap();
     let re_cmd_quit = Regex::new(&event_cmd_quit[..]).unwrap();
+    let re_cmd_say  = Regex::new(&event_cmd_say[..]).unwrap();
 
     if re_motd.is_match(line) {
         debug(format!("CONNECTED"));
@@ -222,6 +225,20 @@ fn handle_line(stream: &mut TcpStream, line: &str) -> Event {
                 let part_msg = caps_cmd.at(3).unwrap_or("");
                 debug(format!("PART {}|{}|{}|{}", sender, msg, channel, part_msg));
                 send_part(stream, channel, part_msg);
+            } else if is_command(msg, CMD_SAY) {
+                let caps_cmd = re_cmd_say.captures(msg).unwrap();
+                let channel  = caps_cmd.at(1).unwrap();
+                let say_msg  = caps_cmd.at(2).unwrap_or("");
+                if say_msg.len() > 0 {
+                    if say_msg.len() > 4 && &say_msg[0..4] == "/me " {
+                        let say_msg2 = "\x01ACTION ".to_string() + &say_msg[4..] + "\x01";
+                        debug(format!("ACT {}|{}|{}|{}", sender, msg, channel, say_msg2));
+                        send_privmsg(stream, channel, &say_msg2[..]);
+                    } else {
+                        debug(format!("SAY {}|{}|{}|{}", sender, msg, channel, say_msg));
+                        send_privmsg(stream, channel, say_msg);
+                    }
+                }
             } else {
                 debug(format!("CMD {}|{}", sender, msg));
             }
