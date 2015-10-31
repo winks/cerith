@@ -3,6 +3,7 @@ extern crate regex;
 
 use getopts::Options;
 use regex::Regex;
+use std::collections::HashSet;
 use std::env;
 use std::io::{Error,Read,Write};
 use std::net::TcpStream;
@@ -33,6 +34,7 @@ static CMD_QUIT: &'static str = "quit";
 static CMD_JOIN: &'static str = "join";
 static CMD_PART: &'static str = "part";
 static CMD_SAY : &'static str = "say";
+static CMD_MODE: &'static str = "mode";
 
 struct User<'a> {
     nick: &'a str,
@@ -135,6 +137,10 @@ fn send_join(stream: &mut TcpStream, channel: &str) {
     let _ = send_raw(stream, &(format!("JOIN {}\n", channel)));
 }
 
+fn send_mode(stream: &mut TcpStream, channel: &str, msg: &str) {
+    let _ = send_raw(stream, &(format!("MODE {} {}\n", channel, msg)));
+}
+
 fn send_nick(stream: &mut TcpStream, msg: &str) {
     let _ = send_raw(stream, &(format!("NICK :{}\n", msg)));
 }
@@ -176,11 +182,13 @@ fn handle_line(stream: &mut TcpStream, line: &str) -> Event {
     let event_cmd_part = format!("{}{}\\s+(\\S+)(\\s+)?(.*)?", CMD_PREFIX, CMD_PART);
     let event_cmd_quit = format!("{}{}(\\s+)?(.*)?", CMD_PREFIX, CMD_QUIT);
     let event_cmd_say  = format!("{}{}\\s+(\\S+)\\s+(.+)", CMD_PREFIX, CMD_SAY);
+    let event_cmd_mode = format!("{}{}\\s+(\\S+)\\s+(.+)", CMD_PREFIX, CMD_MODE);
 
     let re_cmd_join = Regex::new(&event_cmd_join[..]).unwrap();
     let re_cmd_part = Regex::new(&event_cmd_part[..]).unwrap();
     let re_cmd_quit = Regex::new(&event_cmd_quit[..]).unwrap();
     let re_cmd_say  = Regex::new(&event_cmd_say[..]).unwrap();
+    let re_cmd_mode = Regex::new(&event_cmd_mode[..]).unwrap();
 
     if re_motd.is_match(line) {
         debug(format!("CONNECTED"));
@@ -225,6 +233,71 @@ fn handle_line(stream: &mut TcpStream, line: &str) -> Event {
                 let part_msg = caps_cmd.at(3).unwrap_or("");
                 debug(format!("PART {}|{}|{}|{}", sender, msg, channel, part_msg));
                 send_part(stream, channel, part_msg);
+            } else if is_command(msg, CMD_MODE) {
+                let caps_cmd = re_cmd_mode.captures(msg).unwrap();
+                let channel  = caps_cmd.at(1).unwrap();
+                let rest     = caps_cmd.at(2).unwrap_or("");
+
+                if rest.len() < 2 {
+                    let lists: HashSet<_> = [
+                        "I", // invitations masks
+                        "e", // exemptions masks
+                    ].iter().cloned().collect();
+
+                    if rest.len() == 1 && lists.contains(rest) {
+                        debug(format!("CHANMODE L {}|{}|{}|{}", sender, msg, channel, rest));
+                        send_mode(stream, channel, rest);
+                    }
+                    return Event::CMD;
+                }
+
+                let first = &rest[0..1];
+                let second = &rest[1..2];
+
+                let pm: HashSet<_> = ["+", "-"].iter().cloned().collect();
+                if !pm.contains(first) {
+                    return Event::CMD;
+                }
+
+                // https://www.alien.net.au/irc/chanmodes.html
+                let arity_0: HashSet<_> = [
+                    "c", // no colors
+                    "C", // no ctcp
+                    "m", // moderated
+                    "n", // no external messages
+                    "r", // registered users only
+                    "R", // registered users only
+                    "s", // secret
+                    "S", // strip colors
+                    "t", // topic lock
+                    "z", // secure joins only
+                ].iter().cloned().collect();
+
+                let arity_1: HashSet<_> = [
+                    "b", // ban
+                    "h", // half-op
+                    "k", // channel key
+                    "l", // channel limit
+                    "o", // operator
+                    "v", // voice
+                ].iter().cloned().collect();
+
+                if arity_0.contains(second) {
+                    let mode = &rest[0..2];
+                    debug(format!("CHANMODE 0 {}|{}|{}|{}", sender, msg, channel, mode));
+                    send_mode(stream, channel, mode);
+                } else if arity_1.contains(second) {
+                    let mode = &rest[0..2];
+                    if rest.len() < 4 {
+                        return Event::CMD;
+                    }
+                    let arg = &rest[3..].trim();
+                    debug(format!("CHANMODE 1 {}|{}|{}|{}|{}", sender, msg, channel, mode, arg));
+                    send_mode(stream, channel, &rest[..]);
+                } else {
+                    debug(format!("CHANMODE ? {}|{}|{}", sender, msg, channel));
+                    //send_privmsg(stream, channel, &say_msg2[..]);
+                }
             } else if is_command(msg, CMD_SAY) {
                 let caps_cmd = re_cmd_say.captures(msg).unwrap();
                 let channel  = caps_cmd.at(1).unwrap();
