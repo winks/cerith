@@ -5,3 +5,4 @@ authors = ["Florian Anderiasch <fa@art-core.org>"]
 [dependencies]
 getopts = "0.2"
 regex = "0.1.41"
+time = "0.1"

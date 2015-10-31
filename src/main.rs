@@ -1,5 +1,6 @@
 extern crate getopts;
 extern crate regex;
+extern crate time;
 
 use getopts::Options;
 use regex::Regex;
@@ -21,6 +22,7 @@ static REALNAME: &'static str = "Cerith";
 static USERNAME: &'static str = "Cerith";
 static USERMODE: i32 = 8;
 static DEFAULT_PORT: i32 = 6667;
+static CTCP_DELIM: &'static str = "\x01";
 
 // Messages to be sent.
 static MSG_QUIT : &'static str = "Fin.";
@@ -46,6 +48,7 @@ enum Event {
     Command,
     CommandCancelled,
     Connected,
+    CTCP,
     PingPong,
     PrivMsg,
     Quit,
@@ -65,7 +68,29 @@ fn print_usage(program: &str, opts: Options) {
 }
 
 fn print_version() {
-    print!("{} {}\n", NAME, VERSION)
+    println!("{}", get_version())
+}
+
+fn get_version() -> String {
+    format!("{} {}", NAME, VERSION)
+}
+
+fn get_utc_time(msec: bool) -> String {
+    let now = time::now_utc().to_timespec();
+    let ss = now.sec.to_string();
+    let ns = now.nsec.to_string();
+    if msec {
+        return ss + &ns[0..3];
+    } else {
+        return ss;
+    }
+}
+
+fn get_local_time() -> String {
+    let now = time::now();
+    let fmt = format!("{}", now.rfc822());
+
+    return fmt.replace(",", "");
 }
 
 fn parse_int(s: String) -> i32 {
@@ -143,6 +168,18 @@ fn send_raw(stream: &mut TcpStream, msg: &String) -> Result<(), Error> {
     sent
 }
 
+fn send_ctcp(stream: &mut TcpStream, to: &str, command: &str, msg: &str) {
+    let delim = CTCP_DELIM.to_string();
+    let ctcp = delim + command + " " + msg + CTCP_DELIM;
+    let _ = send_privmsg(stream, to, &ctcp[..]);
+}
+
+fn send_ctcp_reply(stream: &mut TcpStream, to: &str, command: &str, msg: &str) {
+    let delim = CTCP_DELIM.to_string();
+    let ctcp = delim + command + " " + msg + CTCP_DELIM;
+    let _ = send_notice(stream, to, &ctcp[..]);
+}
+
 fn send_join(stream: &mut TcpStream, channel: &str) {
     let _ = send_raw(stream, &(format!("JOIN {}\n", channel)));
 }
@@ -153,6 +190,10 @@ fn send_mode(stream: &mut TcpStream, channel: &str, msg: &str) {
 
 fn send_nick(stream: &mut TcpStream, msg: &str) {
     let _ = send_raw(stream, &(format!("NICK :{}\n", msg)));
+}
+
+fn send_notice(stream: &mut TcpStream, to: &str, msg: &str) {
+    let _ = send_raw(stream, &(format!("NOTICE {} :{}\n", to, msg)));
 }
 
 fn send_part(stream: &mut TcpStream, channel: &str, msg: &str) {
@@ -216,8 +257,13 @@ fn handle_line(stream: &mut TcpStream, line: &str) -> Event {
     } else if re_priv.is_match(line) {
         let caps   = re_priv.captures(line).unwrap();
         let sender = caps.at(1).unwrap();
-        let msg    = caps.at(2).unwrap();
+        let msg    = caps.at(2).unwrap_or("");
         let user   = parse_hostmask(sender);
+
+        if msg.len() < 1 {
+            debug(format!("PRIVMSG TOO SHORT {}", sender));
+            return Event::PrivMsg;
+        }
 
         // these are the bot commands with prefix
         if msg.chars().nth(0) == CMD_PREFIX.chars().nth(0) {
@@ -318,9 +364,9 @@ fn handle_line(stream: &mut TcpStream, line: &str) -> Event {
                 let say_msg  = caps_cmd.at(2).unwrap_or("");
                 if say_msg.len() > 0 {
                     if say_msg.len() > 4 && &say_msg[0..4] == "/me " {
-                        let say_msg2 = "\x01ACTION ".to_string() + &say_msg[4..] + "\x01";
-                        debug(format!("ACT {}|{}|{}|{}", sender, msg, channel, say_msg2));
-                        send_privmsg(stream, channel, &say_msg2[..]);
+                        let ctcp = "ACTION";
+                        debug(format!("ACT {}|{}|{}|{}", sender, msg, channel, &say_msg[4..]));
+                        send_ctcp(stream, channel, ctcp, &say_msg[4..])
                     } else {
                         debug(format!("SAY {}|{}|{}|{}", sender, msg, channel, say_msg));
                         send_privmsg(stream, channel, say_msg);
@@ -333,6 +379,41 @@ fn handle_line(stream: &mut TcpStream, line: &str) -> Event {
             }
 
             return Event::Command;
+        } else if &msg[0..1] == "\x01" {
+            // CTCP stuff
+            let len = msg.len();
+            if len < 3 || &msg[len-1..len] != "\x01" {
+                debug(format!("PRIVMSG CTCP:FAIL {}|{}", sender, msg));
+                return Event::PrivMsg;
+            }
+            let payload = &msg[1..len-1];
+            debug(format!("PRIVMSG CTCP:OK {}|{}", sender, payload));
+
+            if payload == "VERSION" {
+                let command = "VERSION";
+                let reply = get_version();
+                debug(format!("PRIVMSG CTCP:{} {}|{}", command, sender, reply));
+                send_ctcp_reply(stream, sender, command, &reply[..]);
+
+                return Event::CTCP;
+            } else if payload == "TIME" {
+                let command = "TIME";
+                let reply = get_local_time();
+                debug(format!("PRIVMSG CTCP:{} {}|{}", command, sender, reply));
+                send_ctcp_reply(stream, sender, command, &reply[..]);
+
+                return Event::CTCP;
+            } else if &payload[0..4] == "PING" {
+                if payload.len() < 6 {
+                    return Event::Unknown;
+                }
+                //let rest = &payload[5..];
+                let command = "PING";
+
+                let reply = get_utc_time(true);
+                debug(format!("PRIVMSG CTCP:{} {}|{}", command, sender, reply));
+                send_ctcp_reply(stream, sender, command, &reply[..]);
+            }
         } else {
             debug(format!("PRIVMSG {}|{}", sender, msg));
 
