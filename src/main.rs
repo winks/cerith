@@ -12,7 +12,7 @@ use std::thread;
 // General config stuff
 static VERSION: &'static str = "0.1.0";
 static NAME   : &'static str = "Cerith";
-static ADMIN  : &'static str = "wink";
+static ADMIN  : &'static str = "wink!fhtagn@cordelia.art-core.org";
 static DEBUG  : bool = true;
 
 // IRC config stuff
@@ -43,12 +43,14 @@ struct User<'a> {
 }
 
 enum Event {
-    CMD,
-    CONNECTED,
-    PING,
-    PRIVMSG,
-    QUIT,
-    UNKNOWN
+    Command,
+    CommandCancelled,
+    Connected,
+    PingPong,
+    PrivMsg,
+    Quit,
+    Unknown,
+    Unprivileged,
 }
 
 fn debug(msg: String) {
@@ -76,7 +78,7 @@ fn parse_int(s: String) -> i32 {
     return num;
 }
 
-fn split_hostmask(s: &str) -> User {
+fn parse_hostmask(s: &str) -> User {
     let re = Regex::new(r"^(.*)!(.*)@(.*)").unwrap();
     if re.is_match(s) {
         let x = re.captures(s).unwrap();
@@ -90,11 +92,19 @@ fn split_hostmask(s: &str) -> User {
     }
 }
 
+fn join_hostmask(user: &User) -> String {
+    format!("{}!{}@{}", user.nick, user.ident, user.host)
+}
+
 fn is_command(input: &str, command: &str) -> bool {
     let full = CMD_PREFIX.to_string() + command;
     let len = full.len();
 
     return input == full || &input[0..len] == full;
+}
+
+fn has_privilege(user: &User) -> bool {
+    join_hostmask(&user) == ADMIN
 }
 
 // Adapted from https://github.com/mattnenterprise/rust-pop3/blob/20acb17197a7553d5a664725fe96df9fa5d042fd/src/pop3.rs
@@ -196,32 +206,33 @@ fn handle_line(stream: &mut TcpStream, line: &str) -> Event {
 
         send_privmsg(stream, ADMIN, MSG_GREET);
 
-        return Event::CONNECTED;
+        return Event::Connected;
     } else if re_ping.is_match(line) {
         let payload = re_ping.captures(line).unwrap().at(1).unwrap();
         debug(format!("PONG {}", payload));
         send_pong(stream, payload);
 
-        return Event::PING;
+        return Event::PingPong;
     } else if re_priv.is_match(line) {
         let caps   = re_priv.captures(line).unwrap();
         let sender = caps.at(1).unwrap();
         let msg    = caps.at(2).unwrap();
-        let user   = split_hostmask(sender);
+        let user   = parse_hostmask(sender);
 
         // these are the bot commands with prefix
         if msg.chars().nth(0) == CMD_PREFIX.chars().nth(0) {
-            if is_command(msg, CMD_QUIT) {
-                if user.nick == ADMIN {
-                    let caps_cmd = re_cmd_quit.captures(msg).unwrap();
-                    let quit_msg = caps_cmd.at(2).unwrap_or("");
-                    debug(format!("EXITING {}", quit_msg));
-                    send_privmsg(stream, user.nick, MSG_IQUIT);
+            if ! has_privilege(&user) {
+                send_privmsg(stream, user.nick, MSG_NOPE);
 
-                    return Event::QUIT;
-                } else {
-                    send_privmsg(stream, user.nick, MSG_NOPE);
-                }
+                return Event::Unprivileged;
+            }
+            if is_command(msg, CMD_QUIT) {
+                let caps_cmd = re_cmd_quit.captures(msg).unwrap();
+                let quit_msg = caps_cmd.at(2).unwrap_or("");
+                debug(format!("EXITING {}", quit_msg));
+                send_privmsg(stream, user.nick, MSG_IQUIT);
+
+                return Event::Quit;
             } else if is_command(msg, CMD_JOIN) {
                 let caps_cmd = re_cmd_join.captures(msg).unwrap();
                 let channel  = caps_cmd.at(1).unwrap();
@@ -247,8 +258,10 @@ fn handle_line(stream: &mut TcpStream, line: &str) -> Event {
                     if rest.len() == 1 && lists.contains(rest) {
                         debug(format!("CHANMODE L {}|{}|{}|{}", sender, msg, channel, rest));
                         send_mode(stream, channel, rest);
+
+                        return Event::Command;
                     }
-                    return Event::CMD;
+                    return Event::CommandCancelled;
                 }
 
                 let first = &rest[0..1];
@@ -256,7 +269,7 @@ fn handle_line(stream: &mut TcpStream, line: &str) -> Event {
 
                 let pm: HashSet<_> = ["+", "-"].iter().cloned().collect();
                 if !pm.contains(first) {
-                    return Event::CMD;
+                    return Event::CommandCancelled;
                 }
 
                 // https://www.alien.net.au/irc/chanmodes.html
@@ -289,7 +302,7 @@ fn handle_line(stream: &mut TcpStream, line: &str) -> Event {
                 } else if arity_1.contains(second) {
                     let mode = &rest[0..2];
                     if rest.len() < 4 {
-                        return Event::CMD;
+                        return Event::CommandCancelled;
                     }
                     let arg = &rest[3..].trim();
                     debug(format!("CHANMODE 1 {}|{}|{}|{}|{}", sender, msg, channel, mode, arg));
@@ -297,6 +310,7 @@ fn handle_line(stream: &mut TcpStream, line: &str) -> Event {
                 } else {
                     debug(format!("CHANMODE ? {}|{}|{}", sender, msg, channel));
                     //send_privmsg(stream, channel, &say_msg2[..]);
+                    return Event::CommandCancelled;
                 }
             } else if is_command(msg, CMD_SAY) {
                 let caps_cmd = re_cmd_say.captures(msg).unwrap();
@@ -311,19 +325,21 @@ fn handle_line(stream: &mut TcpStream, line: &str) -> Event {
                         debug(format!("SAY {}|{}|{}|{}", sender, msg, channel, say_msg));
                         send_privmsg(stream, channel, say_msg);
                     }
+                } else {
+                    return Event::CommandCancelled;
                 }
             } else {
                 debug(format!("CMD {}|{}", sender, msg));
             }
 
-            return Event::CMD;
+            return Event::Command;
         } else {
             debug(format!("PRIVMSG {}|{}", sender, msg));
 
-            return Event::PRIVMSG;
+            return Event::PrivMsg;
         }
     }
-    return Event::UNKNOWN;
+    return Event::Unknown;
 }
 
 fn connect(host: &str, port: i32) {
@@ -347,11 +363,11 @@ fn connect(host: &str, port: i32) {
 
         let event = handle_line(&mut tcp_stream, line);
         match event {
-            Event::QUIT => {
-                debug(format!("Event::QUIT"));
+            Event::Quit => {
+                debug(format!("Event::Quit"));
                 break
             },
-            Event::CONNECTED => debug(format!("Event::CONNECTED")),
+            Event::Connected => debug(format!("Event::Connected")),
             _ => ()
         }
     }
