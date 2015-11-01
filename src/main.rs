@@ -51,7 +51,7 @@ enum Event {
     CTCP,
     PingPong,
     PrivMsg,
-    Quit,
+    Quit(String),
     Unknown,
     Unprivileged,
 }
@@ -87,10 +87,18 @@ fn get_utc_time(msec: bool) -> String {
 }
 
 fn get_local_time() -> String {
+    let now = time::now_utc();
+    return format!("{}", now.rfc822()).replace(",","");
+    /*
+    //This would need %Z support in strftime on Windows :(
     let now = time::now();
-    let fmt = format!("{}", now.rfc822());
-
-    return fmt.replace(",", "");
+    let fmt = "%a %d %b %Y %H:%M:%S %Z";
+    let result = match now.strftime(fmt) {
+        Ok(v) => v,
+        _     => now.rfc822(),
+    };
+    return format!("{}", result).replace(",","");
+    */
 }
 
 fn parse_int(s: String) -> i32 {
@@ -278,7 +286,7 @@ fn handle_line(stream: &mut TcpStream, line: &str) -> Event {
                 debug(format!("EXITING {}", quit_msg));
                 send_privmsg(stream, user.nick, MSG_IQUIT);
 
-                return Event::Quit;
+                return Event::Quit(quit_msg.to_string());
             } else if is_command(msg, CMD_JOIN) {
                 let caps_cmd = re_cmd_join.captures(msg).unwrap();
                 let channel  = caps_cmd.at(1).unwrap();
@@ -429,6 +437,7 @@ fn connect(host: &str, port: i32) {
 
     let mut rcvd;
     let mut initialized = false;
+    let mut quit_msg = MSG_QUIT.to_string();
 
     loop {
         rcvd = read_response(&mut tcp_stream);
@@ -444,8 +453,9 @@ fn connect(host: &str, port: i32) {
 
         let event = handle_line(&mut tcp_stream, line);
         match event {
-            Event::Quit => {
-                debug(format!("Event::Quit"));
+            Event::Quit(v) => {
+                debug(format!("Event::Quit {}", v));
+                quit_msg = v;
                 break
             },
             Event::Connected => debug(format!("Event::Connected")),
@@ -455,7 +465,7 @@ fn connect(host: &str, port: i32) {
 
     // shutting down
     thread::sleep_ms(200);
-    send_quit(&mut tcp_stream, MSG_QUIT);
+    send_quit(&mut tcp_stream, &quit_msg[..]);
     println!("");
 }
 
