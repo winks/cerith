@@ -6,9 +6,11 @@ use getopts::Options;
 use regex::Regex;
 use std::collections::HashSet;
 use std::env;
-use std::io::{Error, Read, Write};
+use std::io::{Error, ErrorKind, Read, Write};
 use std::net::TcpStream;
 use std::thread;
+
+use IRCStreamTypes::{Basic, Foo};
 
 // General config stuff
 static VERSION: &'static str = "0.1.0";
@@ -37,6 +39,20 @@ static CMD_JOIN: &'static str = "join";
 static CMD_PART: &'static str = "part";
 static CMD_SAY: &'static str = "say";
 static CMD_MODE: &'static str = "mode";
+
+enum IRCStreamTypes {
+    Basic(TcpStream),
+    Foo(TcpStream)
+    //Ssl(SslStream<TcpStream>)
+}
+
+pub struct IRCStream {
+    //stream: IRCStreamTypes,
+    stream: TcpStream,
+    pub host: String,
+    pub port: i32,
+    pub is_authenticated: bool
+}
 
 struct User<'a> {
     nick: &'a str,
@@ -146,333 +162,348 @@ fn has_privilege(user: &User) -> bool {
 
 // Adapted from https://github.com/mattnenterprise/
 // rust-pop3/blob/20acb17197a7553d5a664725fe96df9fa5d042fd/src/pop3.rs
-fn read_response(stream: &mut TcpStream) -> Vec<String> {
-    // Carriage return
-    let cr = 0x0d;
-    // Line Feed
-    let lf = 0x0a;
-    let mut line_buffer: Vec<u8> = Vec::new();
-    let mut all: Vec<String> = Vec::new();
-    while line_buffer.len() < 2 ||
-          (line_buffer[line_buffer.len() - 1] != lf && line_buffer[line_buffer.len() - 2] != cr) {
-        let byte_buffer: &mut [u8] = &mut [0];
-        match stream.read(byte_buffer) {
-            Ok(_) => {}
-            Err(_) => println!("Error Reading!"),
-        }
-        line_buffer.push(byte_buffer[0]);
-    }
 
-    match String::from_utf8(line_buffer.clone()) {
-        Ok(res) => {
-            // println!("DEBUG {:?}", res);
-            all.push(res);
-            // line_buffer = Vec::new();
-        }
-        Err(_) => panic!("Failed to read the response"),
-    }
 
-    all
-}
 
-fn send_raw(stream: &mut TcpStream, msg: &String) -> Result<(), Error> {
-    let sent = stream.write_fmt(format_args!("{}", msg));
-    debug(format!("S {:?} {:?}", msg, sent));
+impl IRCStream {
 
-    sent
-}
+    pub fn run(&mut self) {
+        let mut quit_msg = MSG_QUIT.to_string();
+        let mut rcvd;
+        let mut initialized = false;
 
-fn send_ctcp(stream: &mut TcpStream, to: &str, command: &str, msg: &str) {
-    let delim = CTCP_DELIM.to_string();
-    let ctcp = delim + command + " " + msg + CTCP_DELIM;
-    let _ = send_privmsg(stream, to, &ctcp[..]);
-}
+        loop {
+            rcvd = self.read_response();
+            let line = &rcvd[0][..];
+            debug(format!("R {:?}", line));
 
-fn send_ctcp_reply(stream: &mut TcpStream, to: &str, command: &str, msg: &str) {
-    let delim = CTCP_DELIM.to_string();
-    let ctcp = delim + command + " " + msg + CTCP_DELIM;
-    let _ = send_notice(stream, to, &ctcp[..]);
-}
-
-fn send_join(stream: &mut TcpStream, channel: &str) {
-    let _ = send_raw(stream, &(format!("JOIN {}\n", channel)));
-}
-
-fn send_mode(stream: &mut TcpStream, channel: &str, msg: &str) {
-    let _ = send_raw(stream, &(format!("MODE {} {}\n", channel, msg)));
-}
-
-fn send_nick(stream: &mut TcpStream, msg: &str) {
-    let _ = send_raw(stream, &(format!("NICK :{}\n", msg)));
-}
-
-fn send_notice(stream: &mut TcpStream, to: &str, msg: &str) {
-    let _ = send_raw(stream, &(format!("NOTICE {} :{}\n", to, msg)));
-}
-
-fn send_part(stream: &mut TcpStream, channel: &str, msg: &str) {
-    if msg.len() > 0 {
-        let _ = send_raw(stream, &(format!("PART {} :{}\n", channel, msg)));
-    } else {
-        let _ = send_raw(stream, &(format!("PART {}\n", channel)));
-    }
-}
-
-fn send_pong(stream: &mut TcpStream, msg: &str) {
-    let _ = send_raw(stream, &(format!("PONG :{}\n", msg)));
-}
-
-fn send_privmsg(stream: &mut TcpStream, to: &str, msg: &str) {
-    let _ = send_raw(stream, &(format!("PRIVMSG {} :{}\n", to, msg)));
-}
-
-fn send_user(stream: &mut TcpStream, name: &str, mode: i32, realname: &str) {
-    let _ = send_raw(stream,
-                     &(format!("USER {} {} * :{}\n", name, mode, realname)));
-}
-
-fn send_quit(stream: &mut TcpStream, msg: &str) {
-    let _ = send_raw(stream, &(format!("QUIT :{}\n", msg)));
-}
-
-fn handle_line(stream: &mut TcpStream, line: &str) -> Event {
-    let event_priv = format!(":(.*) PRIVMSG {} :(.*)\r\n", NICKNAME);
-    let event_ping = "^PING\\s+:(.*)";
-    let event_motd = ".*End of MOTD command.*";
-
-    let re_motd = Regex::new(&event_motd[..]).unwrap();
-    let re_ping = Regex::new(&event_ping[..]).unwrap();
-    let re_priv = Regex::new(&event_priv[..]).unwrap();
-
-    let event_cmd_join = format!("{}{}\\s+(.*)", CMD_PREFIX, CMD_JOIN);
-    let event_cmd_part = format!("{}{}\\s+(\\S+)(\\s+)?(.*)?", CMD_PREFIX, CMD_PART);
-    let event_cmd_quit = format!("{}{}(\\s+)?(.*)?", CMD_PREFIX, CMD_QUIT);
-    let event_cmd_say = format!("{}{}\\s+(\\S+)\\s+(.+)", CMD_PREFIX, CMD_SAY);
-    let event_cmd_mode = format!("{}{}\\s+(\\S+)\\s+(.+)", CMD_PREFIX, CMD_MODE);
-
-    let re_cmd_join = Regex::new(&event_cmd_join[..]).unwrap();
-    let re_cmd_part = Regex::new(&event_cmd_part[..]).unwrap();
-    let re_cmd_quit = Regex::new(&event_cmd_quit[..]).unwrap();
-    let re_cmd_say = Regex::new(&event_cmd_say[..]).unwrap();
-    let re_cmd_mode = Regex::new(&event_cmd_mode[..]).unwrap();
-
-    if re_motd.is_match(line) {
-        debug(format!("CONNECTED"));
-        thread::sleep_ms(1000);
-
-        send_privmsg(stream, ADMIN, MSG_GREET);
-
-        return Event::Connected;
-    } else if re_ping.is_match(line) {
-        let payload = re_ping.captures(line).unwrap().at(1).unwrap();
-        debug(format!("PONG {}", payload));
-        send_pong(stream, payload);
-
-        return Event::PingPong;
-    } else if re_priv.is_match(line) {
-        let caps = re_priv.captures(line).unwrap();
-        let sender = caps.at(1).unwrap();
-        let msg = caps.at(2).unwrap_or("");
-        let user = parse_hostmask(sender);
-
-        if msg.len() < 1 {
-            debug(format!("PRIVMSG TOO SHORT {}", sender));
-            return Event::PrivMsg;
-        }
-
-        // these are the bot commands with prefix
-        if msg.chars().nth(0) == CMD_PREFIX.chars().nth(0) {
-            if !has_privilege(&user) {
-                send_privmsg(stream, user.nick, MSG_NOPE);
-
-                return Event::Unprivileged;
-            }
-            if is_command(msg, CMD_QUIT) {
-                let caps_cmd = re_cmd_quit.captures(msg).unwrap();
-                let quit_msg = caps_cmd.at(2).unwrap_or("");
-                debug(format!("EXITING {}", quit_msg));
-                send_privmsg(stream, user.nick, MSG_IQUIT);
-
-                return Event::Quit(quit_msg.to_string());
-            } else if is_command(msg, CMD_JOIN) {
-                let caps_cmd = re_cmd_join.captures(msg).unwrap();
-                let channel = caps_cmd.at(1).unwrap();
-                debug(format!("JOIN {}|{}|{}", sender, msg, channel));
-                send_join(stream, channel);
-            } else if is_command(msg, CMD_PART) {
-                let caps_cmd = re_cmd_part.captures(msg).unwrap();
-                let channel = caps_cmd.at(1).unwrap();
-                let part_msg = caps_cmd.at(3).unwrap_or("");
-                debug(format!("PART {}|{}|{}|{}", sender, msg, channel, part_msg));
-                send_part(stream, channel, part_msg);
-            } else if is_command(msg, CMD_MODE) {
-                let caps_cmd = re_cmd_mode.captures(msg).unwrap();
-                let channel = caps_cmd.at(1).unwrap();
-                let rest = caps_cmd.at(2).unwrap_or("");
-
-                if rest.len() < 2 {
-                    let lists: HashSet<_> = ["I" /* invitations masks */,
-                                             "e" /* exemptions masks */]
-                                                .iter()
-                                                .cloned()
-                                                .collect();
-
-                    if rest.len() == 1 && lists.contains(rest) {
-                        debug(format!("CHANMODE L {}|{}|{}|{}", sender, msg, channel, rest));
-                        send_mode(stream, channel, rest);
-
-                        return Event::Command;
-                    }
-                    return Event::CommandCancelled;
-                }
-
-                let first = &rest[0..1];
-                let second = &rest[1..2];
-
-                let pm: HashSet<_> = ["+", "-"].iter().cloned().collect();
-                if !pm.contains(first) {
-                    return Event::CommandCancelled;
-                }
-
-                // https://www.alien.net.au/irc/chanmodes.html
-                let arity_0: HashSet<_> = ["c" /* no colors */, "C" /* no ctcp */,
-                                           "m" /* moderated */,
-                                           "n" /* no external messages */,
-                                           "r" /* registered users only */,
-                                           "R" /* registered users only */,
-                                           "s" /* secret */, "S" /* strip colors */,
-                                           "t" /* topic lock */,
-                                           "z" /* secure joins only */]
-                                              .iter()
-                                              .cloned()
-                                              .collect();
-
-                let arity_1: HashSet<_> = ["b" /* ban */, "h" /* half-op */,
-                                           "k" /* channel key */,
-                                           "l" /* channel limit */, "o" /* operator */,
-                                           "v" /* voice */]
-                                              .iter()
-                                              .cloned()
-                                              .collect();
-
-                if arity_0.contains(second) {
-                    let mode = &rest[0..2];
-                    debug(format!("CHANMODE 0 {}|{}|{}|{}", sender, msg, channel, mode));
-                    send_mode(stream, channel, mode);
-                } else if arity_1.contains(second) {
-                    let mode = &rest[0..2];
-                    if rest.len() < 4 {
-                        return Event::CommandCancelled;
-                    }
-                    let arg = &rest[3..].trim();
-                    debug(format!("CHANMODE 1 {}|{}|{}|{}|{}", sender, msg, channel, mode, arg));
-                    send_mode(stream, channel, &rest[..]);
-                } else {
-                    debug(format!("CHANMODE ? {}|{}|{}", sender, msg, channel));
-                    // send_privmsg(stream, channel, &say_msg2[..]);
-                    return Event::CommandCancelled;
-                }
-            } else if is_command(msg, CMD_SAY) {
-                let caps_cmd = re_cmd_say.captures(msg).unwrap();
-                let channel = caps_cmd.at(1).unwrap();
-                let say_msg = caps_cmd.at(2).unwrap_or("");
-                if say_msg.len() > 0 {
-                    if say_msg.len() > 4 && &say_msg[0..4] == "/me " {
-                        let ctcp = "ACTION";
-                        debug(format!("ACT {}|{}|{}|{}", sender, msg, channel, &say_msg[4..]));
-                        send_ctcp(stream, channel, ctcp, &say_msg[4..])
-                    } else {
-                        debug(format!("SAY {}|{}|{}|{}", sender, msg, channel, say_msg));
-                        send_privmsg(stream, channel, say_msg);
-                    }
-                } else {
-                    return Event::CommandCancelled;
-                }
-            } else {
-                debug(format!("CMD {}|{}", sender, msg));
+            if !initialized {
+                self.send_nick(NICKNAME);
+                self.send_user(USERNAME, USERMODE, REALNAME);
+                initialized = true;
+                continue;
             }
 
-            return Event::Command;
-        } else if &msg[0..1] == "\x01" {
-            // CTCP stuff
-            let len = msg.len();
-            if len < 3 || &msg[len - 1..len] != "\x01" {
-                debug(format!("PRIVMSG CTCP:FAIL {}|{}", sender, msg));
+            let event = self.handle_line(line);
+            match event {
+                Event::Quit(v) => {
+                    debug(format!("Event::Quit {}", v));
+                    quit_msg = v;
+                    break;
+                }
+                Event::Connected => debug(format!("Event::Connected")),
+                _ => (),
+            }
+        }
+
+        // shutting down
+        thread::sleep_ms(200);
+        self.send_quit(&quit_msg[..]);
+        println!("");
+    }
+
+    pub fn connect(host: &str, port: i32) -> Result<IRCStream, Error> {
+        let conn_string = format!("{}:{}", host, port);
+        //let mut tcp_stream = TcpStream::connect(&conn_string[..]).unwrap();
+        let tcp_stream = match TcpStream::connect(&conn_string[..]) {
+            Ok(x) => x,
+            Err(f) => return Err(Error::new(ErrorKind::Other, "foo"))
+        };
+
+        let mut socket = IRCStream {stream: tcp_stream, host: host.to_string(), port: port, is_authenticated: false};
+        Ok(socket)
+    }
+
+    pub fn read_response(&mut self) -> Vec<String> {
+        // Carriage return
+        let cr = 0x0d;
+        // Line Feed
+        let lf = 0x0a;
+        let mut line_buffer: Vec<u8> = Vec::new();
+        let mut all: Vec<String> = Vec::new();
+        while line_buffer.len() < 2 ||
+              (line_buffer[line_buffer.len() - 1] != lf && line_buffer[line_buffer.len() - 2] != cr) {
+            let byte_buffer: &mut [u8] = &mut [0];
+            match self.stream.read(byte_buffer) {
+                Ok(_) => {}
+                Err(_) => println!("Error Reading!"),
+            }
+            line_buffer.push(byte_buffer[0]);
+        }
+
+        match String::from_utf8(line_buffer.clone()) {
+            Ok(res) => {
+                // println!("DEBUG {:?}", res);
+                all.push(res);
+                // line_buffer = Vec::new();
+            }
+            Err(_) => panic!("Failed to read the response"),
+        }
+
+        all
+    }
+
+    fn send_raw(&mut self, msg: &String) -> Result<(), Error> {
+        let sent = self.stream.write_fmt(format_args!("{}", msg));
+        debug(format!("S {:?} {:?}", msg, sent));
+
+        sent
+    }
+
+    fn send_ctcp(&mut self, to: &str, command: &str, msg: &str) {
+        let delim = CTCP_DELIM.to_string();
+        let ctcp = delim + command + " " + msg + CTCP_DELIM;
+        let _ = self.send_privmsg(to, &ctcp[..]);
+    }
+
+    fn send_ctcp_reply(&mut self, to: &str, command: &str, msg: &str) {
+        let delim = CTCP_DELIM.to_string();
+        let ctcp = delim + command + " " + msg + CTCP_DELIM;
+        let _ = self.send_notice(to, &ctcp[..]);
+    }
+
+    fn send_join(&mut self, channel: &str) {
+        let _ = self.send_raw(&(format!("JOIN {}\n", channel)));
+    }
+
+    fn send_mode(&mut self, channel: &str, msg: &str) {
+        let _ = self.send_raw(&(format!("MODE {} {}\n", channel, msg)));
+    }
+
+    fn send_nick(&mut self, msg: &str) {
+        let _ = self.send_raw(&(format!("NICK :{}\n", msg)));
+    }
+
+    fn send_notice(&mut self, to: &str, msg: &str) {
+        let _ = self.send_raw(&(format!("NOTICE {} :{}\n", to, msg)));
+    }
+
+    fn send_part(&mut self, channel: &str, msg: &str) {
+        if msg.len() > 0 {
+            let _ = self.send_raw(&(format!("PART {} :{}\n", channel, msg)));
+        } else {
+            let _ = self.send_raw(&(format!("PART {}\n", channel)));
+        }
+    }
+
+    fn send_pong(&mut self, msg: &str) {
+        let _ = self.send_raw(&(format!("PONG :{}\n", msg)));
+    }
+
+    fn send_privmsg(&mut self, to: &str, msg: &str) {
+        let _ = self.send_raw(&(format!("PRIVMSG {} :{}\n", to, msg)));
+    }
+
+    fn send_user(&mut self, name: &str, mode: i32, realname: &str) {
+        let _ = self.send_raw(
+                         &(format!("USER {} {} * :{}\n", name, mode, realname)));
+    }
+
+    fn send_quit(&mut self, msg: &str) {
+        let _ = self.send_raw(&(format!("QUIT :{}\n", msg)));
+    }
+
+    fn handle_line(&mut self, line: &str) -> Event {
+        let event_priv = format!(":(.*) PRIVMSG {} :(.*)\r\n", NICKNAME);
+        let event_ping = "^PING\\s+:(.*)";
+        let event_motd = ".*End of MOTD command.*";
+
+        let re_motd = Regex::new(&event_motd[..]).unwrap();
+        let re_ping = Regex::new(&event_ping[..]).unwrap();
+        let re_priv = Regex::new(&event_priv[..]).unwrap();
+
+        let event_cmd_join = format!("{}{}\\s+(.*)", CMD_PREFIX, CMD_JOIN);
+        let event_cmd_part = format!("{}{}\\s+(\\S+)(\\s+)?(.*)?", CMD_PREFIX, CMD_PART);
+        let event_cmd_quit = format!("{}{}(\\s+)?(.*)?", CMD_PREFIX, CMD_QUIT);
+        let event_cmd_say = format!("{}{}\\s+(\\S+)\\s+(.+)", CMD_PREFIX, CMD_SAY);
+        let event_cmd_mode = format!("{}{}\\s+(\\S+)\\s+(.+)", CMD_PREFIX, CMD_MODE);
+
+        let re_cmd_join = Regex::new(&event_cmd_join[..]).unwrap();
+        let re_cmd_part = Regex::new(&event_cmd_part[..]).unwrap();
+        let re_cmd_quit = Regex::new(&event_cmd_quit[..]).unwrap();
+        let re_cmd_say = Regex::new(&event_cmd_say[..]).unwrap();
+        let re_cmd_mode = Regex::new(&event_cmd_mode[..]).unwrap();
+
+        if re_motd.is_match(line) {
+            debug(format!("CONNECTED"));
+            thread::sleep_ms(1000);
+
+            self.send_privmsg(ADMIN, MSG_GREET);
+
+            return Event::Connected;
+        } else if re_ping.is_match(line) {
+            let payload = re_ping.captures(line).unwrap().at(1).unwrap();
+            debug(format!("PONG {}", payload));
+            self.send_pong(payload);
+
+            return Event::PingPong;
+        } else if re_priv.is_match(line) {
+            let caps = re_priv.captures(line).unwrap();
+            let sender = caps.at(1).unwrap();
+            let msg = caps.at(2).unwrap_or("");
+            let user = parse_hostmask(sender);
+
+            if msg.len() < 1 {
+                debug(format!("PRIVMSG TOO SHORT {}", sender));
                 return Event::PrivMsg;
             }
-            let payload = &msg[1..len - 1];
-            debug(format!("PRIVMSG CTCP:OK {}|{}", sender, payload));
 
-            if payload == "VERSION" {
-                let command = "VERSION";
-                let reply = get_version();
-                debug(format!("PRIVMSG CTCP:{} {}|{}", command, sender, reply));
-                send_ctcp_reply(stream, sender, command, &reply[..]);
+            // these are the bot commands with prefix
+            if msg.chars().nth(0) == CMD_PREFIX.chars().nth(0) {
+                if !has_privilege(&user) {
+                    self.send_privmsg(user.nick, MSG_NOPE);
 
-                return Event::CTCP;
-            } else if payload == "TIME" {
-                let command = "TIME";
-                let reply = get_local_time();
-                debug(format!("PRIVMSG CTCP:{} {}|{}", command, sender, reply));
-                send_ctcp_reply(stream, sender, command, &reply[..]);
-
-                return Event::CTCP;
-            } else if &payload[0..4] == "PING" {
-                if payload.len() < 6 {
-                    return Event::Unknown;
+                    return Event::Unprivileged;
                 }
-                // let rest = &payload[5..];
-                let command = "PING";
+                if is_command(msg, CMD_QUIT) {
+                    let caps_cmd = re_cmd_quit.captures(msg).unwrap();
+                    let quit_msg = caps_cmd.at(2).unwrap_or("");
+                    debug(format!("EXITING {}", quit_msg));
+                    self.send_privmsg(user.nick, MSG_IQUIT);
 
-                let reply = get_utc_time(true);
-                debug(format!("PRIVMSG CTCP:{} {}|{}", command, sender, reply));
-                send_ctcp_reply(stream, sender, command, &reply[..]);
+                    return Event::Quit(quit_msg.to_string());
+                } else if is_command(msg, CMD_JOIN) {
+                    let caps_cmd = re_cmd_join.captures(msg).unwrap();
+                    let channel = caps_cmd.at(1).unwrap();
+                    debug(format!("JOIN {}|{}|{}", sender, msg, channel));
+                    self.send_join(channel);
+                } else if is_command(msg, CMD_PART) {
+                    let caps_cmd = re_cmd_part.captures(msg).unwrap();
+                    let channel = caps_cmd.at(1).unwrap();
+                    let part_msg = caps_cmd.at(3).unwrap_or("");
+                    debug(format!("PART {}|{}|{}|{}", sender, msg, channel, part_msg));
+                    self.send_part(channel, part_msg);
+                } else if is_command(msg, CMD_MODE) {
+                    let caps_cmd = re_cmd_mode.captures(msg).unwrap();
+                    let channel = caps_cmd.at(1).unwrap();
+                    let rest = caps_cmd.at(2).unwrap_or("");
+
+                    if rest.len() < 2 {
+                        let lists: HashSet<_> = ["I" /* invitations masks */,
+                                                 "e" /* exemptions masks */]
+                                                    .iter()
+                                                    .cloned()
+                                                    .collect();
+
+                        if rest.len() == 1 && lists.contains(rest) {
+                            debug(format!("CHANMODE L {}|{}|{}|{}", sender, msg, channel, rest));
+                            self.send_mode(channel, rest);
+
+                            return Event::Command;
+                        }
+                        return Event::CommandCancelled;
+                    }
+
+                    let first = &rest[0..1];
+                    let second = &rest[1..2];
+
+                    let pm: HashSet<_> = ["+", "-"].iter().cloned().collect();
+                    if !pm.contains(first) {
+                        return Event::CommandCancelled;
+                    }
+
+                    // https://www.alien.net.au/irc/chanmodes.html
+                    let arity_0: HashSet<_> = ["c" /* no colors */, "C" /* no ctcp */,
+                                               "m" /* moderated */,
+                                               "n" /* no external messages */,
+                                               "r" /* registered users only */,
+                                               "R" /* registered users only */,
+                                               "s" /* secret */, "S" /* strip colors */,
+                                               "t" /* topic lock */,
+                                               "z" /* secure joins only */]
+                                                  .iter()
+                                                  .cloned()
+                                                  .collect();
+
+                    let arity_1: HashSet<_> = ["b" /* ban */, "h" /* half-op */,
+                                               "k" /* channel key */,
+                                               "l" /* channel limit */, "o" /* operator */,
+                                               "v" /* voice */]
+                                                  .iter()
+                                                  .cloned()
+                                                  .collect();
+
+                    if arity_0.contains(second) {
+                        let mode = &rest[0..2];
+                        debug(format!("CHANMODE 0 {}|{}|{}|{}", sender, msg, channel, mode));
+                        self.send_mode(channel, mode);
+                    } else if arity_1.contains(second) {
+                        let mode = &rest[0..2];
+                        if rest.len() < 4 {
+                            return Event::CommandCancelled;
+                        }
+                        let arg = &rest[3..].trim();
+                        debug(format!("CHANMODE 1 {}|{}|{}|{}|{}", sender, msg, channel, mode, arg));
+                        self.send_mode(channel, &rest[..]);
+                    } else {
+                        debug(format!("CHANMODE ? {}|{}|{}", sender, msg, channel));
+                        // send_privmsg(stream, channel, &say_msg2[..]);
+                        return Event::CommandCancelled;
+                    }
+                } else if is_command(msg, CMD_SAY) {
+                    let caps_cmd = re_cmd_say.captures(msg).unwrap();
+                    let channel = caps_cmd.at(1).unwrap();
+                    let say_msg = caps_cmd.at(2).unwrap_or("");
+                    if say_msg.len() > 0 {
+                        if say_msg.len() > 4 && &say_msg[0..4] == "/me " {
+                            let ctcp = "ACTION";
+                            debug(format!("ACT {}|{}|{}|{}", sender, msg, channel, &say_msg[4..]));
+                            self.send_ctcp(channel, ctcp, &say_msg[4..])
+                        } else {
+                            debug(format!("SAY {}|{}|{}|{}", sender, msg, channel, say_msg));
+                            self.send_privmsg(channel, say_msg);
+                        }
+                    } else {
+                        return Event::CommandCancelled;
+                    }
+                } else {
+                    debug(format!("CMD {}|{}", sender, msg));
+                }
+
+                return Event::Command;
+            } else if &msg[0..1] == "\x01" {
+                // CTCP stuff
+                let len = msg.len();
+                if len < 3 || &msg[len - 1..len] != "\x01" {
+                    debug(format!("PRIVMSG CTCP:FAIL {}|{}", sender, msg));
+                    return Event::PrivMsg;
+                }
+                let payload = &msg[1..len - 1];
+                debug(format!("PRIVMSG CTCP:OK {}|{}", sender, payload));
+
+                if payload == "VERSION" {
+                    let command = "VERSION";
+                    let reply = get_version();
+                    debug(format!("PRIVMSG CTCP:{} {}|{}", command, sender, reply));
+                    self.send_ctcp_reply(sender, command, &reply[..]);
+
+                    return Event::CTCP;
+                } else if payload == "TIME" {
+                    let command = "TIME";
+                    let reply = get_local_time();
+                    debug(format!("PRIVMSG CTCP:{} {}|{}", command, sender, reply));
+                    self.send_ctcp_reply(sender, command, &reply[..]);
+
+                    return Event::CTCP;
+                } else if &payload[0..4] == "PING" {
+                    if payload.len() < 6 {
+                        return Event::Unknown;
+                    }
+                    // let rest = &payload[5..];
+                    let command = "PING";
+
+                    let reply = get_utc_time(true);
+                    debug(format!("PRIVMSG CTCP:{} {}|{}", command, sender, reply));
+                    self.send_ctcp_reply(sender, command, &reply[..]);
+                }
+            } else {
+                debug(format!("PRIVMSG {}|{}", sender, msg));
+
+                return Event::PrivMsg;
             }
-        } else {
-            debug(format!("PRIVMSG {}|{}", sender, msg));
-
-            return Event::PrivMsg;
         }
+        return Event::Unknown;
     }
-    return Event::Unknown;
-}
-
-fn connect(host: &str, port: i32) {
-    let conn_string = format!("{}:{}", host, port);
-    let mut tcp_stream = TcpStream::connect(&conn_string[..]).unwrap();
-
-    let mut rcvd;
-    let mut initialized = false;
-    let mut quit_msg = MSG_QUIT.to_string();
-
-    loop {
-        rcvd = read_response(&mut tcp_stream);
-        let line = &rcvd[0][..];
-        debug(format!("R {:?}", line));
-
-        if !initialized {
-            send_nick(&mut tcp_stream, NICKNAME);
-            send_user(&mut tcp_stream, USERNAME, USERMODE, REALNAME);
-            initialized = true;
-            continue;
-        }
-
-        let event = handle_line(&mut tcp_stream, line);
-        match event {
-            Event::Quit(v) => {
-                debug(format!("Event::Quit {}", v));
-                quit_msg = v;
-                break;
-            }
-            Event::Connected => debug(format!("Event::Connected")),
-            _ => (),
-        }
-    }
-
-    // shutting down
-    thread::sleep_ms(200);
-    send_quit(&mut tcp_stream, &quit_msg[..]);
-    println!("");
 }
 
 fn main() {
@@ -516,5 +547,11 @@ fn main() {
         port = DEFAULT_PORT
     }
 
-    connect(&server, port);
+    //connect(&server, port);
+
+    let mut sock = match IRCStream::connect(&server.to_owned()[..], port) {
+        Ok(s) => s,
+        Err(e) => panic!("{}", e)
+    };
+    sock.run();
 }
