@@ -2,6 +2,15 @@
 name = "cerith"
 version = "0.1.0"
 authors = ["Florian Anderiasch <fa@art-core.org>"]
+
+[lib]
+name = "cerith"
+path = "src/cerith.rs"
+
+[[bin]]
+name = "cerith"
+path = "src/bot.rs"
+
 [dependencies]
 getopts = "0.2"
 regex = "0.1.41"

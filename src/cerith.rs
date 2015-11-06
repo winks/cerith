@@ -1,16 +1,14 @@
-extern crate getopts;
+#![crate_name = "cerith"]
+#![crate_type = "lib"]
+
 extern crate regex;
 extern crate time;
 
-use getopts::Options;
 use regex::Regex;
 use std::collections::HashSet;
-use std::env;
 use std::io::{Error, ErrorKind, Read, Write};
 use std::net::TcpStream;
 use std::thread;
-
-use IRCStreamTypes::{Basic, Foo};
 
 // General config stuff
 static VERSION: &'static str = "0.1.0";
@@ -23,7 +21,6 @@ static NICKNAME: &'static str = "Cerith";
 static REALNAME: &'static str = "Cerith";
 static USERNAME: &'static str = "Cerith";
 static USERMODE: i32 = 8;
-static DEFAULT_PORT: i32 = 6667;
 static CTCP_DELIM: &'static str = "\x01";
 
 // Messages to be sent.
@@ -40,10 +37,14 @@ static CMD_PART: &'static str = "part";
 static CMD_SAY: &'static str = "say";
 static CMD_MODE: &'static str = "mode";
 
-enum IRCStreamTypes {
-    Basic(TcpStream),
-    Foo(TcpStream)
-    //Ssl(SslStream<TcpStream>)
+fn debug(msg: String) {
+    if DEBUG {
+        println!("___ {}", msg);
+    }
+}
+
+pub fn get_version() -> String {
+    format!("{} {}", NAME, VERSION)
 }
 
 pub struct IRCStream {
@@ -72,25 +73,6 @@ enum Event {
     Unprivileged,
 }
 
-fn debug(msg: String) {
-    if DEBUG {
-        println!("___ {}", msg);
-    }
-}
-
-fn print_usage(program: &str, opts: Options) {
-    let brief = format!("Usage: {} [options]", program);
-    print!("{}", opts.usage(&brief));
-}
-
-fn print_version() {
-    println!("{}", get_version())
-}
-
-fn get_version() -> String {
-    format!("{} {}", NAME, VERSION)
-}
-
 fn get_utc_time(msec: bool) -> String {
     let now = time::now_utc().to_timespec();
     let ss = now.sec.to_string();
@@ -115,16 +97,6 @@ fn get_local_time() -> String {
     // };
     // return format!("{}", result).replace(",","");
     //
-}
-
-fn parse_int(s: String) -> i32 {
-    let n: Option<i32> = s.trim().parse().ok();
-    let num = match n {
-        Some(num) => num,
-        None => 0,
-    };
-
-    return num;
 }
 
 fn parse_hostmask(s: &str) -> User {
@@ -160,13 +132,7 @@ fn has_privilege(user: &User) -> bool {
     join_hostmask(&user) == ADMIN
 }
 
-// Adapted from https://github.com/mattnenterprise/
-// rust-pop3/blob/20acb17197a7553d5a664725fe96df9fa5d042fd/src/pop3.rs
-
-
-
 impl IRCStream {
-
     pub fn run(&mut self) {
         let mut quit_msg = MSG_QUIT.to_string();
         let mut rcvd;
@@ -207,7 +173,7 @@ impl IRCStream {
         //let mut tcp_stream = TcpStream::connect(&conn_string[..]).unwrap();
         let tcp_stream = match TcpStream::connect(&conn_string[..]) {
             Ok(x) => x,
-            Err(f) => return Err(Error::new(ErrorKind::Other, "foo"))
+            Err(_) => return Err(Error::new(ErrorKind::Other, "nope"))
         };
 
         let mut socket = IRCStream {stream: tcp_stream, host: host.to_string(), port: port, is_authenticated: false};
@@ -504,54 +470,4 @@ impl IRCStream {
         }
         return Event::Unknown;
     }
-}
-
-fn main() {
-    let args: Vec<String> = env::args().collect();
-    let program = args[0].clone();
-
-    let mut opts = Options::new();
-    opts.optflag("h", "help", "print this help menu");
-    opts.optflag("v", "version", "print the version");
-
-    opts.optopt("c", "connect", "Autoconnect server", "SERVER");
-    opts.optopt("p", "port", "Autoconnect port", "PORT");
-
-    let matches = match opts.parse(&args[1..]) {
-        Ok(m) => {
-            m
-        }
-        Err(f) => {
-            panic!(f.to_string())
-        }
-    };
-    if matches.opt_present("h") {
-        print_usage(&program, opts);
-        return;
-    }
-    if matches.opt_present("v") {
-        print_version();
-        return;
-    }
-    let server = match matches.opt_str("c") {
-        Some(s) => s,
-        None => {
-            panic!("No server given.")
-        }
-    };
-    let mut port = match matches.opt_str("p") {
-        Some(s) => parse_int(s),
-        None => 0,
-    };
-    if port < 1 {
-        port = DEFAULT_PORT
-    }
-
-    //connect(&server, port);
-
-    let mut sock = match IRCStream::connect(&server.to_owned()[..], port) {
-        Ok(s) => s,
-        Err(e) => panic!("{}", e)
-    };
-    sock.run();
 }
