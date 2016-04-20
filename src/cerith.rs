@@ -13,7 +13,7 @@ use std::thread;
 // General config stuff
 static VERSION: &'static str = "0.1.0";
 static NAME: &'static str = "Cerith";
-static ADMIN: &'static str = "wink!fhtagn@cordelia.art-core.org";
+static ADMINS: &'static [&'static str] = &["wink!fhtagn@cordelia.art-core.org"];
 static DEBUG: bool = true;
 
 // IRC config stuff
@@ -129,7 +129,12 @@ fn is_command(input: &str, command: &str) -> bool {
 }
 
 fn has_privilege(user: &User) -> bool {
-    join_hostmask(&user) == ADMIN
+    for admin in ADMINS {
+        if &join_hostmask(&user) == admin {
+            return true
+        }
+    }
+    false
 }
 
 impl IRCStream {
@@ -294,7 +299,9 @@ impl IRCStream {
             debug(format!("CONNECTED"));
             thread::sleep_ms(1000);
 
-            self.send_privmsg(ADMIN, MSG_GREET);
+            for admin in ADMINS {
+                self.send_privmsg(admin, MSG_GREET);
+            }
 
             return Event::Connected;
         } else if re_ping.is_match(line) {
