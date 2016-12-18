@@ -9,9 +9,11 @@ use std::collections::HashSet;
 use std::io::{Error, ErrorKind, Read, Write};
 use std::net::TcpStream;
 use std::thread;
+use std::time::Duration;
 
 // General config stuff
-static VERSION: &'static str = "0.1.0";
+const VERSION: Option<&'static str> = option_env!("CARGO_PKG_VERSION");
+static VERSION_NONE: &'static str = "unknown";
 static NAME: &'static str = "Cerith";
 static ADMINS: &'static [&'static str] = &["wink!fhtagn@cordelia.art-core.org"];
 static DEBUG: bool = true;
@@ -44,7 +46,7 @@ fn debug(msg: String) {
 }
 
 pub fn get_version() -> String {
-    format!("{} {}", NAME, VERSION)
+    format!("{} {}", NAME, VERSION.unwrap_or(VERSION_NONE))
 }
 
 pub struct IRCStream {
@@ -168,7 +170,7 @@ impl IRCStream {
         }
 
         // shutting down
-        thread::sleep_ms(200);
+        thread::sleep(Duration::new(0, 200));
         self.send_quit(&quit_msg[..]);
         println!("");
     }
@@ -181,7 +183,7 @@ impl IRCStream {
             Err(_) => return Err(Error::new(ErrorKind::Other, "nope"))
         };
 
-        let mut socket = IRCStream {stream: tcp_stream, host: host.to_string(), port: port, is_authenticated: false};
+        let socket = IRCStream {stream: tcp_stream, host: host.to_string(), port: port, is_authenticated: false};
         Ok(socket)
     }
 
@@ -297,7 +299,7 @@ impl IRCStream {
 
         if re_motd.is_match(line) {
             debug(format!("CONNECTED"));
-            thread::sleep_ms(1000);
+            thread::sleep(Duration::new(1, 0));
 
             for admin in ADMINS {
                 self.send_privmsg(admin, MSG_GREET);
@@ -337,12 +339,14 @@ impl IRCStream {
                     return Event::Quit(quit_msg.to_string());
                 } else if is_command(msg, CMD_JOIN) {
                     let caps_cmd = re_cmd_join.captures(msg).unwrap();
-                    let channel = caps_cmd.at(1).unwrap();
+                    let channel = caps_cmd.at(1).unwrap_or("");
                     debug(format!("JOIN {}|{}|{}", sender, msg, channel));
-                    self.send_join(channel);
+                    if channel.len() > 0 {
+                        self.send_join(channel);
+                    }
                 } else if is_command(msg, CMD_PART) {
                     let caps_cmd = re_cmd_part.captures(msg).unwrap();
-                    let channel = caps_cmd.at(1).unwrap();
+                    let channel = caps_cmd.at(1).unwrap_or("");
                     let part_msg = caps_cmd.at(3).unwrap_or("");
                     debug(format!("PART {}|{}|{}|{}", sender, msg, channel, part_msg));
                     self.send_part(channel, part_msg);
@@ -415,7 +419,10 @@ impl IRCStream {
                     }
                 } else if is_command(msg, CMD_SAY) {
                     let caps_cmd = re_cmd_say.captures(msg).unwrap();
-                    let channel = caps_cmd.at(1).unwrap();
+                    let channel = caps_cmd.at(1).unwrap_or("");
+                    if channel.len() == 0 {
+                        return Event::CommandCancelled;
+                    }
                     let say_msg = caps_cmd.at(2).unwrap_or("");
                     if say_msg.len() > 0 {
                         if say_msg.len() > 4 && &say_msg[0..4] == "/me " {

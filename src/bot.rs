@@ -45,21 +45,21 @@ fn main() {
             panic!(f.to_string())
         }
     };
-    if matches.opt_present("h") {
+    if matches.opt_present("help") {
         print_usage(&program, opts);
         return;
     }
-    if matches.opt_present("v") {
+    if matches.opt_present("version") {
         print_version();
         return;
     }
-    let server = match matches.opt_str("c") {
+    let server = match matches.opt_str("connect") {
         Some(s) => s,
         None => {
             panic!("No server given.")
         }
     };
-    let mut port = match matches.opt_str("p") {
+    let mut port = match matches.opt_str("port") {
         Some(s) => parse_int(s),
         None => 0,
     };
