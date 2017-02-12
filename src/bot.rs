@@ -93,7 +93,26 @@ fn main() {
         Some(s) => s as i32,
         None => 0,
     };
-   
+
+    let mut admins = Vec::new();
+    
+    match val["bot"]["admins"].as_array() {
+        Some(ax) => {
+            let v = Vec::<String>::new();
+            for a in ax {
+                let a2 = match a.as_str() {
+                    Some(a2) => a2.to_string(),
+                    None => "".to_string(),
+                 };
+                if !a2.is_empty() {
+                    admins.push(a2);
+                }
+            }
+            v
+        },
+        None => Vec::<String>::new(),
+    };
+
     let server_opt = match matches.opt_str("connect") {
         Some(s) => s,
         None => panic!("No server given."),
@@ -118,5 +137,6 @@ fn main() {
         Ok(s) => s,
         Err(e) => panic!("{}", e),
     };
-    conn.run(nickname, username, realname);
+
+    conn.run(nickname, username, realname, admins);
 }

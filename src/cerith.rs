@@ -15,7 +15,6 @@ use std::time::Duration;
 const VERSION: Option<&'static str> = option_env!("CARGO_PKG_VERSION");
 static VERSION_NONE: &'static str = "unknown";
 static NAME: &'static str = "Cerith";
-static ADMINS: &'static [&'static str] = &["wink!fhtagn@cordelia.art-core.org"];
 static DEBUG: bool = true;
 
 // IRC config stuff
@@ -53,6 +52,7 @@ pub struct Config {
     nickname: String,
     username: String,
     realname: String,
+    admins: Vec<String>,
 }
 
 pub struct IRCStream {
@@ -137,8 +137,8 @@ fn is_command(input: &str, command: &str) -> bool {
     input == full || &input[0..len] == full
 }
 
-fn has_privilege(user: &User) -> bool {
-    for admin in ADMINS {
+fn has_privilege(user: &User, admins: &Vec<String>) -> bool {
+    for admin in admins {
         if &join_hostmask(user) == admin {
             return true;
         }
@@ -147,7 +147,7 @@ fn has_privilege(user: &User) -> bool {
 }
 
 impl IRCStream {
-    pub fn run(&mut self, nickname: String, username: String, realname: String) {
+    pub fn run(&mut self, nickname: String, username: String, realname: String, admins: Vec<String>) {
         let mut quit_msg = MSG_QUIT.to_string();
         let mut rcvd;
         let mut initialized = false;
@@ -156,6 +156,7 @@ impl IRCStream {
             nickname: nickname.to_string(),
             username: username.to_string(),
             realname: realname.to_string(),
+            admins: admins,
         };
         self.config = cfg;
 
@@ -202,6 +203,7 @@ impl IRCStream {
             nickname: DEFAULT_NICKNAME.to_string(),
             realname: DEFAULT_REALNAME.to_string(),
             username: DEFAULT_USERNAME.to_string(),
+            admins: Vec::new(),
         };
         let socket = IRCStream {
             stream: tcp_stream,
@@ -327,8 +329,8 @@ impl IRCStream {
             debug(format!("CONNECTED"));
             thread::sleep(Duration::new(1, 0));
 
-            for admin in ADMINS {
-                self.send_privmsg(admin, MSG_GREET);
+            for admin in self.config.admins.clone() {
+                self.send_privmsg(&admin, MSG_GREET);
             }
 
             return Event::Connected;
@@ -351,7 +353,7 @@ impl IRCStream {
 
             // these are the bot commands with prefix
             if msg.chars().nth(0) == CMD_PREFIX.chars().nth(0) {
-                if !has_privilege(&user) {
+                if !has_privilege(&user, &self.config.admins) {
                     self.send_privmsg(user.nick, MSG_NOPE);
 
                     return Event::Unprivileged;
