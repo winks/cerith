@@ -19,9 +19,9 @@ static ADMINS: &'static [&'static str] = &["wink!fhtagn@cordelia.art-core.org"];
 static DEBUG: bool = true;
 
 // IRC config stuff
-static NICKNAME: &'static str = "Cerith";
-static REALNAME: &'static str = "Cerith";
-static USERNAME: &'static str = "Cerith";
+pub const DEFAULT_NICKNAME: &'static str = "Cerith";
+pub const DEFAULT_REALNAME: &'static str = "Cerith";
+pub const DEFAULT_USERNAME: &'static str = "Cerith";
 static USERMODE: i32 = 8;
 static CTCP_DELIM: &'static str = "\x01";
 
@@ -49,12 +49,19 @@ pub fn get_version() -> String {
     format!("{} {}", NAME, VERSION.unwrap_or(VERSION_NONE))
 }
 
+pub struct Config {
+    nickname: String,
+    username: String,
+    realname: String,
+}
+
 pub struct IRCStream {
     //stream: IRCStreamTypes,
     stream: TcpStream,
     pub host: String,
     pub port: i32,
     pub is_authenticated: bool,
+    pub config: Config,
 }
 
 struct User<'a> {
@@ -140,10 +147,17 @@ fn has_privilege(user: &User) -> bool {
 }
 
 impl IRCStream {
-    pub fn run(&mut self) {
+    pub fn run(&mut self, nickname: String, username: String, realname: String) {
         let mut quit_msg = MSG_QUIT.to_string();
         let mut rcvd;
         let mut initialized = false;
+
+        let mut cfg = Config {
+            nickname: nickname.to_string(),
+            username: username.to_string(),
+            realname: realname.to_string(),
+        };
+        self.config = cfg;
 
         loop {
             rcvd = self.read_response();
@@ -151,8 +165,8 @@ impl IRCStream {
             debug(format!("R {:?}", line));
 
             if !initialized {
-                self.send_nick(NICKNAME);
-                self.send_user(USERNAME, USERMODE, REALNAME);
+                self.send_nick(&nickname);
+                self.send_user(&username, USERMODE, &realname);
                 initialized = true;
                 continue;
             }
@@ -177,19 +191,24 @@ impl IRCStream {
         println!("");
     }
 
-    pub fn connect(host: &str, port: i32) -> Result<IRCStream, Error> {
+    pub fn connect(host: String, port: i32) -> Result<IRCStream, Error> {
         let conn_string = format!("{}:{}", host, port);
         //let mut tcp_stream = TcpStream::connect(&conn_string[..]).unwrap();
         let tcp_stream = match TcpStream::connect(&conn_string[..]) {
             Ok(x) => x,
             Err(_) => return Err(Error::new(ErrorKind::Other, "nope")),
         };
-
+        let config = Config{
+            nickname: DEFAULT_NICKNAME.to_string(),
+            realname: DEFAULT_REALNAME.to_string(),
+            username: DEFAULT_USERNAME.to_string(),
+        };
         let socket = IRCStream {
             stream: tcp_stream,
-            host: host.to_string(),
+            host: host,
             port: port,
             is_authenticated: false,
+            config: config,
         };
         Ok(socket)
     }
@@ -284,7 +303,7 @@ impl IRCStream {
     }
 
     fn handle_line(&mut self, line: &str) -> Event {
-        let event_priv = format!(":(.*) PRIVMSG {} :(.*)\r\n", NICKNAME);
+        let event_priv = format!(":(.*) PRIVMSG {} :(.*)\r\n", self.config.nickname);
         let event_ping = "^PING\\s+:(.*)";
         let event_motd = ".*End of MOTD command.*";
 
