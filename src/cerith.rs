@@ -22,6 +22,7 @@ pub const DEFAULT_NICKNAME: &'static str = "Cerith";
 pub const DEFAULT_REALNAME: &'static str = "Cerith";
 pub const DEFAULT_USERNAME: &'static str = "Cerith";
 pub const DEFAULT_USERMODE: i32 = 8; // 8 = +i, 12 = +iw
+pub const DEFAULT_PREFIX: &'static str = "!";
 static CTCP_DELIM: &'static str = "\x01";
 
 // Messages to be sent.
@@ -31,7 +32,6 @@ static MSG_IQUIT: &'static str = ":(";
 static MSG_NOPE: &'static str = "You're not the boss of me.";
 
 // Commands that are recognized
-static CMD_PREFIX: &'static str = "!";
 static CMD_QUIT: &'static str = "quit";
 static CMD_JOIN: &'static str = "join";
 static CMD_PART: &'static str = "part";
@@ -54,6 +54,7 @@ pub struct Config {
     username: String,
     realname: String,
     usermode: i32,
+    prefix: String,
     admins: Vec<String>,
 }
 
@@ -128,13 +129,6 @@ fn join_hostmask(user: &User) -> String {
     format!("{}!{}@{}", user.nick, user.ident, user.host)
 }
 
-fn is_command(input: &str, command: &str) -> bool {
-    let full = CMD_PREFIX.to_string() + command;
-    let len = full.len();
-
-    input == full || &input[0..len] == full
-}
-
 fn has_privilege(user: &User, admins: &Vec<String>) -> bool {
     for admin in admins {
         if &join_hostmask(user) == admin {
@@ -149,6 +143,7 @@ impl Config {
                username: String,
                realname: String,
                usermode: i32,
+               prefix: String,
                admins: Vec<String>)
                -> Config {
         Config {
@@ -156,6 +151,7 @@ impl Config {
             username: username,
             realname: realname,
             usermode: usermode,
+            prefix: prefix,
             admins: admins,
         }
     }
@@ -213,6 +209,7 @@ impl IRCStream {
             realname: DEFAULT_REALNAME.to_string(),
             username: DEFAULT_USERNAME.to_string(),
             usermode: DEFAULT_USERMODE,
+            prefix: DEFAULT_PREFIX.to_string(),
             admins: Vec::new(),
         };
         let socket = IRCStream {
@@ -330,11 +327,11 @@ impl IRCStream {
         let re_ping = Regex::new(&event_ping[..]).unwrap();
         let re_priv = Regex::new(&event_priv[..]).unwrap();
 
-        let event_cmd_join = format!("{}{}\\s+(.*)", CMD_PREFIX, CMD_JOIN);
-        let event_cmd_part = format!("{}{}\\s+(\\S+)(\\s+)?(.*)?", CMD_PREFIX, CMD_PART);
-        let event_cmd_quit = format!("{}{}(\\s+)?(.*)?", CMD_PREFIX, CMD_QUIT);
-        let event_cmd_say = format!("{}{}\\s+(\\S+)\\s+(.+)", CMD_PREFIX, CMD_SAY);
-        let event_cmd_mode = format!("{}{}\\s+(\\S+)\\s+(.+)", CMD_PREFIX, CMD_MODE);
+        let event_cmd_join = format!("{}{}\\s+(.*)", self.config.prefix, CMD_JOIN);
+        let event_cmd_part = format!("{}{}\\s+(\\S+)(\\s+)?(.*)?", self.config.prefix, CMD_PART);
+        let event_cmd_quit = format!("{}{}(\\s+)?(.*)?", self.config.prefix, CMD_QUIT);
+        let event_cmd_say = format!("{}{}\\s+(\\S+)\\s+(.+)", self.config.prefix, CMD_SAY);
+        let event_cmd_mode = format!("{}{}\\s+(\\S+)\\s+(.+)", self.config.prefix, CMD_MODE);
 
         let re_cmd_join = Regex::new(&event_cmd_join[..]).unwrap();
         let re_cmd_part = Regex::new(&event_cmd_part[..]).unwrap();
@@ -369,33 +366,33 @@ impl IRCStream {
             }
 
             // these are the bot commands with prefix
-            if msg.chars().nth(0) == CMD_PREFIX.chars().nth(0) {
+            if msg.starts_with(&self.config.prefix) {
                 if !has_privilege(&user, &self.config.admins) {
                     self.send_privmsg(user.nick, MSG_NOPE);
 
                     return Event::Unprivileged;
                 }
-                if is_command(msg, CMD_QUIT) {
+                if self.is_command(msg, CMD_QUIT) {
                     let caps_cmd = re_cmd_quit.captures(msg).unwrap();
                     let quit_msg = caps_cmd.get(2).map_or("", |m| m.as_str());
                     debug(format!("EXITING {}", quit_msg));
                     self.send_privmsg(user.nick, MSG_IQUIT);
 
                     return Event::Quit(quit_msg.to_string());
-                } else if is_command(msg, CMD_JOIN) {
+                } else if self.is_command(msg, CMD_JOIN) {
                     let caps_cmd = re_cmd_join.captures(msg).unwrap();
                     let channel = caps_cmd.get(1).map_or("", |m| m.as_str());
                     debug(format!("JOIN {}|{}|{}", sender, msg, channel));
                     if !channel.is_empty() {
                         self.send_join(channel);
                     }
-                } else if is_command(msg, CMD_PART) {
+                } else if self.is_command(msg, CMD_PART) {
                     let caps_cmd = re_cmd_part.captures(msg).unwrap();
                     let channel = caps_cmd.get(1).map_or("", |m| m.as_str());
                     let part_msg = caps_cmd.get(3).map_or("", |m| m.as_str());
                     debug(format!("PART {}|{}|{}|{}", sender, msg, channel, part_msg));
                     self.send_part(channel, part_msg);
-                } else if is_command(msg, CMD_MODE) {
+                } else if self.is_command(msg, CMD_MODE) {
                     let caps_cmd = re_cmd_mode.captures(msg).unwrap();
                     let channel = caps_cmd.get(1).unwrap().as_str();
                     let rest = caps_cmd.get(2).map_or("", |m| m.as_str());
@@ -466,7 +463,7 @@ impl IRCStream {
                         // send_privmsg(stream, channel, &say_msg2[..]);
                         return Event::CommandCancelled;
                     }
-                } else if is_command(msg, CMD_SAY) {
+                } else if self.is_command(msg, CMD_SAY) {
                     let caps_cmd = re_cmd_say.captures(msg).unwrap();
                     let channel = caps_cmd.get(1).map_or("", |m| m.as_str());
                     if channel.is_empty() {
@@ -530,5 +527,9 @@ impl IRCStream {
             }
         }
         return Event::Unknown;
+    }
+
+    fn is_command(&mut self, input: &str, command: &str) -> bool {
+        input.starts_with(&format!("{}{}", self.config.prefix, command))
     }
 }

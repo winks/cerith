@@ -98,13 +98,10 @@ fn main() {
         }
         None => -1,
     };
-    let mut server = match val["connection"]["server"].as_str() {
+
+    let prefix = match val["misc"]["prefix"].as_str() {
         Some(s) => s.to_string(),
         None => "".to_string(),
-    };
-    let mut port = match val["connection"]["port"].as_integer() {
-        Some(s) => s as i32,
-        None => 0,
     };
 
     let mut admins = Vec::new();
@@ -124,6 +121,15 @@ fn main() {
             v
         }
         None => Vec::<String>::new(),
+    };
+
+    let mut server = match val["connection"]["server"].as_str() {
+        Some(s) => s.to_string(),
+        None => "".to_string(),
+    };
+    let mut port = match val["connection"]["port"].as_integer() {
+        Some(s) => s as i32,
+        None => 0,
     };
 
     let server_opt = match matches.opt_str("connect") {
@@ -151,7 +157,7 @@ fn main() {
         Err(e) => panic!("{}", e),
     };
 
-    let cfg = Config::new(nickname, username, realname, usermode, admins);
+    let cfg = Config::new(nickname, username, realname, usermode, prefix, admins);
 
     conn.run(cfg);
 }
