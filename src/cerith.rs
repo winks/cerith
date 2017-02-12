@@ -56,6 +56,7 @@ pub struct Config {
     usermode: i32,
     prefix: String,
     admins: Vec<String>,
+    altnicks: Vec<String>,
 }
 
 pub struct IRCStream {
@@ -78,6 +79,7 @@ enum Event {
     CommandCancelled,
     Connected,
     CTCP,
+    NickTaken(String),
     PingPong,
     PrivMsg,
     Quit(String),
@@ -144,7 +146,8 @@ impl Config {
                realname: String,
                usermode: i32,
                prefix: String,
-               admins: Vec<String>)
+               admins: Vec<String>,
+               altnicks: Vec<String>)
                -> Config {
         Config {
             nickname: nickname,
@@ -153,6 +156,7 @@ impl Config {
             usermode: usermode,
             prefix: prefix,
             admins: admins,
+            altnicks: altnicks,
         }
     }
 }
@@ -165,20 +169,26 @@ impl IRCStream {
 
         self.config = config.clone();
 
+        let mut current_nick = config.nickname;
+        let mut nick_counter = 0;
+        let mut counter = 0;
+
         loop {
             rcvd = self.read_response();
             let line = &rcvd[0][..];
             debug(format!("R {:?}", line));
 
-            if !initialized {
-                self.send_nick(&config.nickname);
-                self.send_user(&config.username, config.usermode, &config.realname);
-                initialized = true;
-                continue;
-            }
-
             let event = self.handle_line(line);
             match event {
+                Event::NickTaken(v) => {
+                    debug(format!("Event::NickTaken {}", v));
+                    if nick_counter > config.altnicks.len() - 1 {
+                        quit_msg = ":(".to_string();
+                        break;
+                    }
+                    current_nick = config.altnicks.iter().nth(nick_counter).unwrap().to_string();
+                    nick_counter += 1;
+                }
                 Event::Quit(v) => {
                     debug(format!("Event::Quit {}", v));
                     quit_msg = v;
@@ -186,9 +196,22 @@ impl IRCStream {
                 }
                 Event::Connected => {
                     debug(format!("Event::Connected"));
+                    initialized = true;
+                    continue;
                 }
-                _ => (),
+                _ => {
+                    if counter > 0 {
+                        initialized = true;
+                    }
+                }
             }
+
+            if !initialized {
+                self.send_nick(&current_nick);
+                self.send_user(&config.username, config.usermode, &config.realname);
+            }
+
+            counter += 1
         }
 
         // shutting down
@@ -211,6 +234,7 @@ impl IRCStream {
             usermode: DEFAULT_USERMODE,
             prefix: DEFAULT_PREFIX.to_string(),
             admins: Vec::new(),
+            altnicks: Vec::new(),
         };
         let socket = IRCStream {
             stream: tcp_stream,
@@ -322,10 +346,12 @@ impl IRCStream {
         let event_priv = format!(":(.*) PRIVMSG {} :(.*)\r\n", self.config.nickname);
         let event_ping = "^PING\\s+:(.*)";
         let event_motd = ".*End of MOTD command.*";
+        let event_nick = ":(.*) (.*) :Nickname is already in use.\r\n";
 
         let re_motd = Regex::new(&event_motd[..]).unwrap();
         let re_ping = Regex::new(&event_ping[..]).unwrap();
         let re_priv = Regex::new(&event_priv[..]).unwrap();
+        let re_nick = Regex::new(&event_nick[..]).unwrap();
 
         let event_cmd_join = format!("{}{}\\s+(.*)", self.config.prefix, CMD_JOIN);
         let event_cmd_part = format!("{}{}\\s+(\\S+)(\\s+)?(.*)?", self.config.prefix, CMD_PART);
@@ -339,7 +365,13 @@ impl IRCStream {
         let re_cmd_say = Regex::new(&event_cmd_say[..]).unwrap();
         let re_cmd_mode = Regex::new(&event_cmd_mode[..]).unwrap();
 
-        if re_motd.is_match(line) {
+        if re_nick.is_match(line) {
+            let caps = re_nick.captures(line).unwrap();
+            let nick = caps.get(2).map_or("x", |m| m.as_str());
+            debug(format!("Nick taken: {}", nick));
+
+            return Event::NickTaken(nick.to_string());
+        } else if re_motd.is_match(line) {
             debug(format!("CONNECTED"));
             thread::sleep(Duration::new(1, 0));
 

@@ -105,6 +105,7 @@ fn main() {
     };
 
     let mut admins = Vec::new();
+    let mut altnicks = Vec::new();
 
     match val["bot"]["admins"].as_array() {
         Some(ax) => {
@@ -116,6 +117,23 @@ fn main() {
                 };
                 if !a2.is_empty() {
                     admins.push(a2);
+                }
+            }
+            v
+        }
+        None => Vec::<String>::new(),
+    };
+
+    match val["bot"]["altnicks"].as_array() {
+        Some(ax) => {
+            let v = Vec::<String>::new();
+            for a in ax {
+                let a2 = match a.as_str() {
+                    Some(a2) => a2.to_string(),
+                    None => "".to_string(),
+                };
+                if !a2.is_empty() {
+                    altnicks.push(a2);
                 }
             }
             v
@@ -157,7 +175,13 @@ fn main() {
         Err(e) => panic!("{}", e),
     };
 
-    let cfg = Config::new(nickname, username, realname, usermode, prefix, admins);
+    let cfg = Config::new(nickname,
+                          username,
+                          realname,
+                          usermode,
+                          prefix,
+                          admins,
+                          altnicks);
 
     conn.run(cfg);
 }

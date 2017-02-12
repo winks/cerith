@@ -2,8 +2,13 @@
 nickname = "Cerith"
 username = "Cerith"
 realname = "Cerith"
-admins = ["user!user@example.org"]
+usermode = "iw"
+admins = ["nick!user@example.org"]
+altnicks = ["Cerith_", "Cerith__"]
 
 [connection]
 server = "irc.uni-erlangen.de"
 port = 6667
+
+[misc]
+prefix = "!"
