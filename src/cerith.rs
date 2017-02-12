@@ -6,6 +6,7 @@ extern crate time;
 
 use regex::Regex;
 use std::collections::HashSet;
+use std::fmt;
 use std::io::{Error, ErrorKind, Read, Write};
 use std::net::TcpStream;
 use std::thread;
@@ -16,6 +17,7 @@ const VERSION: Option<&'static str> = option_env!("CARGO_PKG_VERSION");
 static VERSION_NONE: &'static str = "unknown";
 static NAME: &'static str = "Cerith";
 static DEBUG: bool = true;
+pub const DEFAULT_PORT: i32 = 6667;
 
 // IRC config stuff
 pub const DEFAULT_NICKNAME: &'static str = "Cerith";
@@ -48,7 +50,13 @@ pub fn get_version() -> String {
     format!("{} {}", NAME, VERSION.unwrap_or(VERSION_NONE))
 }
 
-#[derive(Clone)]
+#[derive(Debug)]
+pub struct Server {
+    host: String,
+    port: i32,
+}
+
+#[derive(Clone, Debug)]
 pub struct Config {
     nickname: String,
     username: String,
@@ -140,6 +148,22 @@ fn has_privilege(user: &User, admins: &[String]) -> bool {
     false
 }
 
+impl Server {
+    pub fn new(host: String, port: i32) -> Server {
+        Server {
+            host: host,
+            port: port,
+        }
+    }
+}
+
+impl fmt::Display for Server {
+    // This trait requires `fmt` with this exact signature.
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}:{}", self.host, self.port)
+    }
+}
+
 impl Config {
     pub fn new(nickname: String,
                username: String,
@@ -220,8 +244,14 @@ impl IRCStream {
         println!("");
     }
 
-    pub fn connect(host: String, port: i32) -> Result<IRCStream, Error> {
-        let conn_string = format!("{}:{}", host, port);
+    pub fn connect2(host: String, port: i32) -> Result<IRCStream, Error> {
+        let server = Server::new(host, port);
+
+        IRCStream::connect(&server)
+    }
+
+    pub fn connect(server: &Server) -> Result<IRCStream, Error> {
+        let conn_string = format!("{}:{}", server.host, server.port);
         //let mut tcp_stream = TcpStream::connect(&conn_string[..]).unwrap();
         let tcp_stream = match TcpStream::connect(&conn_string[..]) {
             Ok(x) => x,
@@ -238,8 +268,8 @@ impl IRCStream {
         };
         let socket = IRCStream {
             stream: tcp_stream,
-            host: host,
-            port: port,
+            host: server.host.clone(),
+            port: server.port,
             is_authenticated: false,
             config: config,
         };
@@ -303,19 +333,19 @@ impl IRCStream {
     }
 
     fn send_join(&mut self, channel: &str) {
-        self.send_raw(&(format!("JOIN {}\n", channel)));
+        let _ = self.send_raw(&(format!("JOIN {}\n", channel)));
     }
 
     fn send_mode(&mut self, channel: &str, msg: &str) {
-        self.send_raw(&(format!("MODE {} {}\n", channel, msg)));
+        let _ = self.send_raw(&(format!("MODE {} {}\n", channel, msg)));
     }
 
     fn send_nick(&mut self, msg: &str) {
-        self.send_raw2(format!("NICK :{}\n", msg));
+        let _ = self.send_raw2(format!("NICK :{}\n", msg));
     }
 
     fn send_notice(&mut self, to: &str, msg: &str) {
-        self.send_raw(&(format!("NOTICE {} :{}\n", to, msg)));
+        let _ = self.send_raw(&(format!("NOTICE {} :{}\n", to, msg)));
     }
 
     fn send_part(&mut self, channel: &str, msg: &str) {
@@ -327,19 +357,19 @@ impl IRCStream {
     }
 
     fn send_pong(&mut self, msg: &str) {
-        self.send_raw(&(format!("PONG :{}\n", msg)));
+        let _ = self.send_raw(&(format!("PONG :{}\n", msg)));
     }
 
     fn send_privmsg(&mut self, to: &str, msg: &str) {
-        self.send_raw(&(format!("PRIVMSG {} :{}\n", to, msg)));
+        let _ = self.send_raw(&(format!("PRIVMSG {} :{}\n", to, msg)));
     }
 
     fn send_user(&mut self, name: &str, mode: i32, realname: &str) {
-        self.send_raw(&(format!("USER {} {} * :{}\n", name, mode, realname)));
+        let _ = self.send_raw(&(format!("USER {} {} * :{}\n", name, mode, realname)));
     }
 
     fn send_quit(&mut self, msg: &str) {
-        self.send_raw(&(format!("QUIT :{}\n", msg)));
+        let _ = self.send_raw(&(format!("QUIT :{}\n", msg)));
     }
 
     fn handle_line(&mut self, line: &str) -> Event {
@@ -404,27 +434,27 @@ impl IRCStream {
 
                     return Event::Unprivileged;
                 }
-                if self.is_command(msg, CMD_QUIT) {
+                if self.valid_command(msg, CMD_QUIT) {
                     let caps_cmd = re_cmd_quit.captures(msg).unwrap();
                     let quit_msg = caps_cmd.get(2).map_or("", |m| m.as_str());
                     debug(format!("EXITING {}", quit_msg));
                     self.send_privmsg(user.nick, MSG_IQUIT);
 
                     return Event::Quit(quit_msg.to_string());
-                } else if self.is_command(msg, CMD_JOIN) {
+                } else if self.valid_command(msg, CMD_JOIN) {
                     let caps_cmd = re_cmd_join.captures(msg).unwrap();
                     let channel = caps_cmd.get(1).map_or("", |m| m.as_str());
                     debug(format!("JOIN {}|{}|{}", sender, msg, channel));
                     if !channel.is_empty() {
                         self.send_join(channel);
                     }
-                } else if self.is_command(msg, CMD_PART) {
+                } else if self.valid_command(msg, CMD_PART) {
                     let caps_cmd = re_cmd_part.captures(msg).unwrap();
                     let channel = caps_cmd.get(1).map_or("", |m| m.as_str());
                     let part_msg = caps_cmd.get(3).map_or("", |m| m.as_str());
                     debug(format!("PART {}|{}|{}|{}", sender, msg, channel, part_msg));
                     self.send_part(channel, part_msg);
-                } else if self.is_command(msg, CMD_MODE) {
+                } else if self.valid_command(msg, CMD_MODE) {
                     let caps_cmd = re_cmd_mode.captures(msg).unwrap();
                     let channel = caps_cmd.get(1).unwrap().as_str();
                     let rest = caps_cmd.get(2).map_or("", |m| m.as_str());
@@ -495,7 +525,7 @@ impl IRCStream {
                         // send_privmsg(stream, channel, &say_msg2[..]);
                         return Event::CommandCancelled;
                     }
-                } else if self.is_command(msg, CMD_SAY) {
+                } else if self.valid_command(msg, CMD_SAY) {
                     let caps_cmd = re_cmd_say.captures(msg).unwrap();
                     let channel = caps_cmd.get(1).map_or("", |m| m.as_str());
                     if channel.is_empty() {
@@ -562,7 +592,7 @@ impl IRCStream {
         Event::Unknown
     }
 
-    fn is_command(&mut self, input: &str, command: &str) -> bool {
+    fn valid_command(&mut self, input: &str, command: &str) -> bool {
         input.starts_with(&format!("{}{}", self.config.prefix, command))
     }
 }

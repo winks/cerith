@@ -7,8 +7,8 @@ admins = ["nick!user@example.org"]
 altnicks = ["Cerith_", "Cerith__"]
 
 [connection]
-server = "irc.uni-erlangen.de"
-port = 6667
+server_1 = ["irc.uni-erlangen.de", "6667"]
+server_2 = ["irc.uni-erlangen.de", "6668"]
 
 [misc]
 prefix = "!"

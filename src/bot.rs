@@ -2,15 +2,13 @@ extern crate cerith;
 extern crate getopts;
 extern crate toml;
 
-use cerith::{IRCStream, get_version, Config};
+use cerith::{IRCStream, get_version, Config, Server, DEFAULT_PORT};
 use getopts::Options;
 use std::env;
 use std::io::Read;
 use std::path::Path;
 use std::fs::File;
 use toml::Value;
-
-static DEFAULT_PORT: i32 = 6667;
 
 fn print_usage(program: &str, opts: Options) {
     let brief = format!("Usage: {} [options]", program);
@@ -64,50 +62,44 @@ fn main() {
 
     let val = read_config_file(filename);
     let cfg = parse_toml(&val);
-
-    let mut server = match val["connection"]["server"].as_str() {
-        Some(s) => s.to_string(),
-        None => "".to_string(),
-    };
-    let mut port = match val["connection"]["port"].as_integer() {
-        Some(s) => s as i32,
-        None => 0,
-    };
+    let mut servers = parse_servers(&val);
 
     // cli opts, overwriting the config
     let server_opt = match matches.opt_str("connect") {
         Some(s) => s,
-        None => panic!("No server given."),
+        None => "".to_string(),
     };
     let port_opt = match matches.opt_str("port") {
         Some(s) => parse_int(s),
-        None => 0,
+        None => DEFAULT_PORT,
     };
 
-    if port < 1 {
-        if port_opt > 0 {
-            port = port_opt
-        } else {
-            port = DEFAULT_PORT
-        }
-    }
-    if server.is_empty() {
-        server = server_opt
+    // overwrite servers from config with CLI options
+    if !server_opt.is_empty() {
+        let server = Server::new(server_opt.to_string(), port_opt);
+        servers = Vec::<Server>::new();
+        servers.push(server);
     }
 
-    let mut conn = match IRCStream::connect(server, port) {
-        Ok(s) => s,
-        Err(e) => panic!("{}", e),
-    };
+    for i in 0..servers.len() {
+        let srv = &servers[i];
+        let mut conn = match IRCStream::connect(srv) {
+            Ok(s) => s,
+            Err(_) => {
+                println!("ERROR: Could not connect to server {}", srv);
+                continue;
+            }
+        };
 
-    conn.run(cfg);
+        conn.run(cfg.clone());
+    }
 }
 
 fn read_config_file(filename: String) -> Value {
     // check and read config file
     let path = Path::new(&filename);
     let mut file = match File::open(&path) {
-        Err(why) => panic!("couldn't open {}: {}", path.display(), &why),
+        Err(why) => panic!("ERROR: Couldn't open {}: {}", path.display(), &why),
         Ok(file) => file,
     };
 
@@ -194,4 +186,30 @@ fn parse_toml(val: &Value) -> Config {
                 prefix,
                 admins,
                 altnicks)
+}
+
+fn parse_servers(val: &Value) -> Vec<Server> {
+    let mut servers = Vec::<Server>::new();
+    for (k, v) in val["connection"].as_table().unwrap() {
+        if !k.starts_with("server_") {
+            continue;
+        }
+        match v.as_array() {
+            Some(a) => {
+                let host = match a[0].as_str() {
+                    Some(s) => s.to_string(),
+                    None => continue,
+                };
+                let port = match a[1].as_str() {
+                    Some(s) => parse_int(s.to_string()),
+                    None => continue,
+                };
+                let s = Server::new(host, port);
+                servers.push(s);
+            }
+            None => continue,
+        }
+    }
+
+    servers
 }
