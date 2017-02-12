@@ -105,14 +105,14 @@ fn parse_hostmask(s: &str) -> User {
     let re = Regex::new(r"^(.*)!(.*)@(.*)").unwrap();
     if re.is_match(s) {
         let x = re.captures(s).unwrap();
-        let nick = x.at(1).unwrap();
-        let ident = x.at(2).unwrap();
-        let host = x.at(3).unwrap();
+        let nick = x.get(1).unwrap();
+        let ident = x.get(2).unwrap();
+        let host = x.get(3).unwrap();
 
         return User {
-            nick: nick,
-            ident: ident,
-            host: host,
+            nick: nick.as_str(),
+            ident: ident.as_str(),
+            host: host.as_str(),
         };
     } else {
         panic!("Cannot parse host mask: {}", s);
@@ -307,15 +307,15 @@ impl IRCStream {
 
             return Event::Connected;
         } else if re_ping.is_match(line) {
-            let payload = re_ping.captures(line).unwrap().at(1).unwrap();
+            let payload = re_ping.captures(line).unwrap().get(1).unwrap().as_str();
             debug(format!("PONG {}", payload));
             self.send_pong(payload);
 
             return Event::PingPong;
         } else if re_priv.is_match(line) {
             let caps = re_priv.captures(line).unwrap();
-            let sender = caps.at(1).unwrap();
-            let msg = caps.at(2).unwrap_or("");
+            let sender = caps.get(1).unwrap().as_str();
+            let msg = caps.get(2).map_or("", |m| m.as_str());
             let user = parse_hostmask(sender);
 
             if msg.len() < 1 {
@@ -332,28 +332,28 @@ impl IRCStream {
                 }
                 if is_command(msg, CMD_QUIT) {
                     let caps_cmd = re_cmd_quit.captures(msg).unwrap();
-                    let quit_msg = caps_cmd.at(2).unwrap_or("");
+                    let quit_msg = caps_cmd.get(2).map_or("", |m| m.as_str());
                     debug(format!("EXITING {}", quit_msg));
                     self.send_privmsg(user.nick, MSG_IQUIT);
 
                     return Event::Quit(quit_msg.to_string());
                 } else if is_command(msg, CMD_JOIN) {
                     let caps_cmd = re_cmd_join.captures(msg).unwrap();
-                    let channel = caps_cmd.at(1).unwrap_or("");
+                    let channel = caps_cmd.get(1).map_or("", |m| m.as_str());
                     debug(format!("JOIN {}|{}|{}", sender, msg, channel));
                     if channel.len() > 0 {
                         self.send_join(channel);
                     }
                 } else if is_command(msg, CMD_PART) {
                     let caps_cmd = re_cmd_part.captures(msg).unwrap();
-                    let channel = caps_cmd.at(1).unwrap_or("");
-                    let part_msg = caps_cmd.at(3).unwrap_or("");
+                    let channel = caps_cmd.get(1).map_or("", |m| m.as_str());
+                    let part_msg = caps_cmd.get(3).map_or("", |m| m.as_str());
                     debug(format!("PART {}|{}|{}|{}", sender, msg, channel, part_msg));
                     self.send_part(channel, part_msg);
                 } else if is_command(msg, CMD_MODE) {
                     let caps_cmd = re_cmd_mode.captures(msg).unwrap();
-                    let channel = caps_cmd.at(1).unwrap();
-                    let rest = caps_cmd.at(2).unwrap_or("");
+                    let channel = caps_cmd.get(1).unwrap().as_str();
+                    let rest = caps_cmd.get(2).map_or("", |m| m.as_str());
 
                     if rest.len() < 2 {
                         let lists: HashSet<_> = ["I" /* invitations masks */,
@@ -419,11 +419,11 @@ impl IRCStream {
                     }
                 } else if is_command(msg, CMD_SAY) {
                     let caps_cmd = re_cmd_say.captures(msg).unwrap();
-                    let channel = caps_cmd.at(1).unwrap_or("");
+                    let channel = caps_cmd.get(1).map_or("", |m| m.as_str());
                     if channel.len() == 0 {
                         return Event::CommandCancelled;
                     }
-                    let say_msg = caps_cmd.at(2).unwrap_or("");
+                    let say_msg = caps_cmd.get(2).map_or("", |m| m.as_str());
                     if say_msg.len() > 0 {
                         if say_msg.len() > 4 && &say_msg[0..4] == "/me " {
                             let ctcp = "ACTION";

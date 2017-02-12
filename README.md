@@ -2,7 +2,7 @@
 
 ### Intro
 
-An IRC bot written in Rust. Experimental and flawed.
+An IRC bot written in [Rust](https://www.rust-lang.org). Experimental and flawed.
 
 ### Howto
 
