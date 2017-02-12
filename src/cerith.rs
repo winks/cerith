@@ -80,15 +80,14 @@ fn get_utc_time(msec: bool) -> String {
     let ss = now.sec.to_string();
     let ns = now.nsec.to_string();
     if msec {
-        return ss + &ns[0..3];
+        ss + &ns[0..3]
     } else {
-        return ss;
+        ss
     }
 }
 
 fn get_local_time() -> String {
     let now = time::now_utc();
-    return format!("{}", now.rfc822()).replace(",", "");
     //
     // This would need %Z support in strftime on Windows :(
     // let now = time::now();
@@ -99,6 +98,7 @@ fn get_local_time() -> String {
     // };
     // return format!("{}", result).replace(",","");
     //
+    format!("{}", now.rfc822()).replace(",", "")
 }
 
 fn parse_hostmask(s: &str) -> User {
@@ -109,11 +109,11 @@ fn parse_hostmask(s: &str) -> User {
         let ident = x.get(2).unwrap();
         let host = x.get(3).unwrap();
 
-        return User {
+        User {
             nick: nick.as_str(),
             ident: ident.as_str(),
             host: host.as_str(),
-        };
+        }
     } else {
         panic!("Cannot parse host mask: {}", s);
     }
@@ -127,12 +127,12 @@ fn is_command(input: &str, command: &str) -> bool {
     let full = CMD_PREFIX.to_string() + command;
     let len = full.len();
 
-    return input == full || &input[0..len] == full;
+    input == full || &input[0..len] == full
 }
 
 fn has_privilege(user: &User) -> bool {
     for admin in ADMINS {
-        if &join_hostmask(&user) == admin {
+        if &join_hostmask(user) == admin {
             return true;
         }
     }
@@ -164,7 +164,9 @@ impl IRCStream {
                     quit_msg = v;
                     break;
                 }
-                Event::Connected => debug(format!("Event::Connected")),
+                Event::Connected => {
+                    debug(format!("Event::Connected"));
+                }
                 _ => (),
             }
         }
@@ -222,7 +224,7 @@ impl IRCStream {
         all
     }
 
-    fn send_raw(&mut self, msg: &String) -> Result<(), Error> {
+    fn send_raw(&mut self, msg: &str) -> Result<(), Error> {
         let sent = self.stream.write_fmt(format_args!("{}", msg));
         debug(format!("S {:?} {:?}", msg, sent));
 
@@ -232,53 +234,53 @@ impl IRCStream {
     fn send_ctcp(&mut self, to: &str, command: &str, msg: &str) {
         let delim = CTCP_DELIM.to_string();
         let ctcp = delim + command + " " + msg + CTCP_DELIM;
-        let _ = self.send_privmsg(to, &ctcp[..]);
+        self.send_privmsg(to, &ctcp[..]);
     }
 
     fn send_ctcp_reply(&mut self, to: &str, command: &str, msg: &str) {
         let delim = CTCP_DELIM.to_string();
         let ctcp = delim + command + " " + msg + CTCP_DELIM;
-        let _ = self.send_notice(to, &ctcp[..]);
+        self.send_notice(to, &ctcp[..]);
     }
 
     fn send_join(&mut self, channel: &str) {
-        let _ = self.send_raw(&(format!("JOIN {}\n", channel)));
+        self.send_raw(&(format!("JOIN {}\n", channel)));
     }
 
     fn send_mode(&mut self, channel: &str, msg: &str) {
-        let _ = self.send_raw(&(format!("MODE {} {}\n", channel, msg)));
+        self.send_raw(&(format!("MODE {} {}\n", channel, msg)));
     }
 
     fn send_nick(&mut self, msg: &str) {
-        let _ = self.send_raw(&(format!("NICK :{}\n", msg)));
+        self.send_raw(&(format!("NICK :{}\n", msg)));
     }
 
     fn send_notice(&mut self, to: &str, msg: &str) {
-        let _ = self.send_raw(&(format!("NOTICE {} :{}\n", to, msg)));
+        self.send_raw(&(format!("NOTICE {} :{}\n", to, msg)));
     }
 
     fn send_part(&mut self, channel: &str, msg: &str) {
-        if msg.len() > 0 {
-            let _ = self.send_raw(&(format!("PART {} :{}\n", channel, msg)));
-        } else {
+        if msg.is_empty() {
             let _ = self.send_raw(&(format!("PART {}\n", channel)));
+        } else {
+            let _ = self.send_raw(&(format!("PART {} :{}\n", channel, msg)));
         }
     }
 
     fn send_pong(&mut self, msg: &str) {
-        let _ = self.send_raw(&(format!("PONG :{}\n", msg)));
+        self.send_raw(&(format!("PONG :{}\n", msg)));
     }
 
     fn send_privmsg(&mut self, to: &str, msg: &str) {
-        let _ = self.send_raw(&(format!("PRIVMSG {} :{}\n", to, msg)));
+        self.send_raw(&(format!("PRIVMSG {} :{}\n", to, msg)));
     }
 
     fn send_user(&mut self, name: &str, mode: i32, realname: &str) {
-        let _ = self.send_raw(&(format!("USER {} {} * :{}\n", name, mode, realname)));
+        self.send_raw(&(format!("USER {} {} * :{}\n", name, mode, realname)));
     }
 
     fn send_quit(&mut self, msg: &str) {
-        let _ = self.send_raw(&(format!("QUIT :{}\n", msg)));
+        self.send_raw(&(format!("QUIT :{}\n", msg)));
     }
 
     fn handle_line(&mut self, line: &str) -> Event {
@@ -346,7 +348,7 @@ impl IRCStream {
                     let caps_cmd = re_cmd_join.captures(msg).unwrap();
                     let channel = caps_cmd.get(1).map_or("", |m| m.as_str());
                     debug(format!("JOIN {}|{}|{}", sender, msg, channel));
-                    if channel.len() > 0 {
+                    if !channel.is_empty() {
                         self.send_join(channel);
                     }
                 } else if is_command(msg, CMD_PART) {
@@ -429,11 +431,13 @@ impl IRCStream {
                 } else if is_command(msg, CMD_SAY) {
                     let caps_cmd = re_cmd_say.captures(msg).unwrap();
                     let channel = caps_cmd.get(1).map_or("", |m| m.as_str());
-                    if channel.len() == 0 {
+                    if channel.is_empty() {
                         return Event::CommandCancelled;
                     }
                     let say_msg = caps_cmd.get(2).map_or("", |m| m.as_str());
-                    if say_msg.len() > 0 {
+                    if say_msg.is_empty() {
+                        return Event::CommandCancelled;
+                    } else {
                         if say_msg.len() > 4 && &say_msg[0..4] == "/me " {
                             let ctcp = "ACTION";
                             debug(format!("ACT {}|{}|{}|{}", sender, msg, channel, &say_msg[4..]));
@@ -442,8 +446,6 @@ impl IRCStream {
                             debug(format!("SAY {}|{}|{}|{}", sender, msg, channel, say_msg));
                             self.send_privmsg(channel, say_msg);
                         }
-                    } else {
-                        return Event::CommandCancelled;
                     }
                 } else {
                     debug(format!("CMD {}|{}", sender, msg));

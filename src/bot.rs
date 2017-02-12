@@ -18,12 +18,11 @@ fn print_version() {
 
 fn parse_int(s: String) -> i32 {
     let n: Option<i32> = s.trim().parse().ok();
-    let num = match n {
+    
+    match n {
         Some(num) => num,
         None => 0,
-    };
-
-    return num;
+    }
 }
 
 fn main() {
