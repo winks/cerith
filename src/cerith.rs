@@ -131,7 +131,7 @@ fn join_hostmask(user: &User) -> String {
     format!("{}!{}@{}", user.nick, user.ident, user.host)
 }
 
-fn has_privilege(user: &User, admins: &Vec<String>) -> bool {
+fn has_privilege(user: &User, admins: &[String]) -> bool {
     for admin in admins {
         if &join_hostmask(user) == admin {
             return true;
@@ -186,7 +186,7 @@ impl IRCStream {
                         quit_msg = ":(".to_string();
                         break;
                     }
-                    current_nick = config.altnicks.iter().nth(nick_counter).unwrap().to_string();
+                    current_nick = config.altnicks.get(nick_counter).unwrap().to_string();
                     nick_counter += 1;
                 }
                 Event::Quit(v) => {
@@ -195,7 +195,7 @@ impl IRCStream {
                     break;
                 }
                 Event::Connected => {
-                    debug(format!("Event::Connected"));
+                    debug("Event::Connected".to_string());
                     initialized = true;
                     continue;
                 }
@@ -372,7 +372,7 @@ impl IRCStream {
 
             return Event::NickTaken(nick.to_string());
         } else if re_motd.is_match(line) {
-            debug(format!("CONNECTED"));
+            debug("CONNECTED".to_string());
             thread::sleep(Duration::new(1, 0));
 
             for admin in self.config.admins.clone() {
@@ -558,7 +558,8 @@ impl IRCStream {
                 return Event::PrivMsg;
             }
         }
-        return Event::Unknown;
+
+        Event::Unknown
     }
 
     fn is_command(&mut self, input: &str, command: &str) -> bool {

@@ -54,15 +54,57 @@ fn main() {
         print_version();
         return;
     }
-    if !matches.opt_present("file") {
-        print_usage(&program, opts);
-        return;
-    }
-
     let filename = match matches.opt_str("file") {
         Some(s) => s,
-        None => panic!("No file given."),
+        None => {
+            print_usage(&program, opts);
+            return;
+        }
     };
+
+    let val = read_config_file(filename);
+    let cfg = parse_toml(&val);
+
+    let mut server = match val["connection"]["server"].as_str() {
+        Some(s) => s.to_string(),
+        None => "".to_string(),
+    };
+    let mut port = match val["connection"]["port"].as_integer() {
+        Some(s) => s as i32,
+        None => 0,
+    };
+
+    // cli opts, overwriting the config
+    let server_opt = match matches.opt_str("connect") {
+        Some(s) => s,
+        None => panic!("No server given."),
+    };
+    let port_opt = match matches.opt_str("port") {
+        Some(s) => parse_int(s),
+        None => 0,
+    };
+
+    if port < 1 {
+        if port_opt > 0 {
+            port = port_opt
+        } else {
+            port = DEFAULT_PORT
+        }
+    }
+    if server.is_empty() {
+        server = server_opt
+    }
+
+    let mut conn = match IRCStream::connect(server, port) {
+        Ok(s) => s,
+        Err(e) => panic!("{}", e),
+    };
+
+    conn.run(cfg);
+}
+
+fn read_config_file(filename: String) -> Value {
+    // check and read config file
     let path = Path::new(&filename);
     let mut file = match File::open(&path) {
         Err(why) => panic!("couldn't open {}: {}", path.display(), &why),
@@ -71,8 +113,12 @@ fn main() {
 
     let mut contents = String::new();
     let _ = file.read_to_string(&mut contents);
-    let val = contents.parse::<Value>().unwrap();
 
+    contents.parse::<Value>().unwrap()
+}
+
+fn parse_toml(val: &Value) -> Config {
+    // config parameters from config file
     let nickname = match val["bot"]["nickname"].as_str() {
         Some(s) => s.to_string(),
         None => "".to_string(),
@@ -141,47 +187,11 @@ fn main() {
         None => Vec::<String>::new(),
     };
 
-    let mut server = match val["connection"]["server"].as_str() {
-        Some(s) => s.to_string(),
-        None => "".to_string(),
-    };
-    let mut port = match val["connection"]["port"].as_integer() {
-        Some(s) => s as i32,
-        None => 0,
-    };
-
-    let server_opt = match matches.opt_str("connect") {
-        Some(s) => s,
-        None => panic!("No server given."),
-    };
-    let port_opt = match matches.opt_str("port") {
-        Some(s) => parse_int(s),
-        None => 0,
-    };
-
-    if port < 1 {
-        if port_opt > 0 {
-            port = port_opt
-        } else {
-            port = DEFAULT_PORT
-        }
-    }
-    if server.is_empty() {
-        server = server_opt
-    }
-
-    let mut conn = match IRCStream::connect(server, port) {
-        Ok(s) => s,
-        Err(e) => panic!("{}", e),
-    };
-
-    let cfg = Config::new(nickname,
-                          username,
-                          realname,
-                          usermode,
-                          prefix,
-                          admins,
-                          altnicks);
-
-    conn.run(cfg);
+    Config::new(nickname,
+                username,
+                realname,
+                usermode,
+                prefix,
+                admins,
+                altnicks)
 }
