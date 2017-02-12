@@ -38,12 +38,8 @@ fn main() {
     opts.optopt("p", "port", "Autoconnect port", "PORT");
 
     let matches = match opts.parse(&args[1..]) {
-        Ok(m) => {
-            m
-        }
-        Err(f) => {
-            panic!(f.to_string())
-        }
+        Ok(m) => m,
+        Err(f) => panic!(f.to_string()),
     };
     if matches.opt_present("help") {
         print_usage(&program, opts);
@@ -55,9 +51,7 @@ fn main() {
     }
     let server = match matches.opt_str("connect") {
         Some(s) => s,
-        None => {
-            panic!("No server given.")
-        }
+        None => panic!("No server given."),
     };
     let mut port = match matches.opt_str("port") {
         Some(s) => parse_int(s),
@@ -69,7 +63,7 @@ fn main() {
 
     let mut conn = match IRCStream::connect(&server.to_owned()[..], port) {
         Ok(s) => s,
-        Err(e) => panic!("{}", e)
+        Err(e) => panic!("{}", e),
     };
     conn.run();
 }

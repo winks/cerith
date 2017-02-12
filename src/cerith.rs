@@ -54,7 +54,7 @@ pub struct IRCStream {
     stream: TcpStream,
     pub host: String,
     pub port: i32,
-    pub is_authenticated: bool
+    pub is_authenticated: bool,
 }
 
 struct User<'a> {
@@ -133,7 +133,7 @@ fn is_command(input: &str, command: &str) -> bool {
 fn has_privilege(user: &User) -> bool {
     for admin in ADMINS {
         if &join_hostmask(&user) == admin {
-            return true
+            return true;
         }
     }
     false
@@ -180,10 +180,15 @@ impl IRCStream {
         //let mut tcp_stream = TcpStream::connect(&conn_string[..]).unwrap();
         let tcp_stream = match TcpStream::connect(&conn_string[..]) {
             Ok(x) => x,
-            Err(_) => return Err(Error::new(ErrorKind::Other, "nope"))
+            Err(_) => return Err(Error::new(ErrorKind::Other, "nope")),
         };
 
-        let socket = IRCStream {stream: tcp_stream, host: host.to_string(), port: port, is_authenticated: false};
+        let socket = IRCStream {
+            stream: tcp_stream,
+            host: host.to_string(),
+            port: port,
+            is_authenticated: false,
+        };
         Ok(socket)
     }
 
@@ -195,7 +200,8 @@ impl IRCStream {
         let mut line_buffer: Vec<u8> = Vec::new();
         let mut all: Vec<String> = Vec::new();
         while line_buffer.len() < 2 ||
-              (line_buffer[line_buffer.len() - 1] != lf && line_buffer[line_buffer.len() - 2] != cr) {
+              (line_buffer[line_buffer.len() - 1] != lf &&
+               line_buffer[line_buffer.len() - 2] != cr) {
             let byte_buffer: &mut [u8] = &mut [0];
             match self.stream.read(byte_buffer) {
                 Ok(_) => {}
@@ -268,8 +274,7 @@ impl IRCStream {
     }
 
     fn send_user(&mut self, name: &str, mode: i32, realname: &str) {
-        let _ = self.send_raw(
-                         &(format!("USER {} {} * :{}\n", name, mode, realname)));
+        let _ = self.send_raw(&(format!("USER {} {} * :{}\n", name, mode, realname)));
     }
 
     fn send_quit(&mut self, msg: &str) {
@@ -358,9 +363,9 @@ impl IRCStream {
                     if rest.len() < 2 {
                         let lists: HashSet<_> = ["I" /* invitations masks */,
                                                  "e" /* exemptions masks */]
-                                                    .iter()
-                                                    .cloned()
-                                                    .collect();
+                            .iter()
+                            .cloned()
+                            .collect();
 
                         if rest.len() == 1 && lists.contains(rest) {
                             debug(format!("CHANMODE L {}|{}|{}|{}", sender, msg, channel, rest));
@@ -380,25 +385,24 @@ impl IRCStream {
                     }
 
                     // https://www.alien.net.au/irc/chanmodes.html
-                    let arity_0: HashSet<_> = ["c" /* no colors */, "C" /* no ctcp */,
-                                               "m" /* moderated */,
-                                               "n" /* no external messages */,
-                                               "r" /* registered users only */,
-                                               "R" /* registered users only */,
-                                               "s" /* secret */, "S" /* strip colors */,
-                                               "t" /* topic lock */,
-                                               "z" /* secure joins only */]
-                                                  .iter()
-                                                  .cloned()
-                                                  .collect();
+                    let arity_0: HashSet<_> =
+                        ["c" /* no colors */, "C" /* no ctcp */,
+                         "m" /* moderated */, "n" /* no external messages */,
+                         "r" /* registered users only */,
+                         "R" /* registered users only */, "s" /* secret */,
+                         "S" /* strip colors */, "t" /* topic lock */,
+                         "z" /* secure joins only */]
+                            .iter()
+                            .cloned()
+                            .collect();
 
                     let arity_1: HashSet<_> = ["b" /* ban */, "h" /* half-op */,
                                                "k" /* channel key */,
-                                               "l" /* channel limit */, "o" /* operator */,
-                                               "v" /* voice */]
-                                                  .iter()
-                                                  .cloned()
-                                                  .collect();
+                                               "l" /* channel limit */,
+                                               "o" /* operator */, "v" /* voice */]
+                        .iter()
+                        .cloned()
+                        .collect();
 
                     if arity_0.contains(second) {
                         let mode = &rest[0..2];
@@ -410,7 +414,12 @@ impl IRCStream {
                             return Event::CommandCancelled;
                         }
                         let arg = &rest[3..].trim();
-                        debug(format!("CHANMODE 1 {}|{}|{}|{}|{}", sender, msg, channel, mode, arg));
+                        debug(format!("CHANMODE 1 {}|{}|{}|{}|{}",
+                                      sender,
+                                      msg,
+                                      channel,
+                                      mode,
+                                      arg));
                         self.send_mode(channel, &rest[..]);
                     } else {
                         debug(format!("CHANMODE ? {}|{}|{}", sender, msg, channel));
