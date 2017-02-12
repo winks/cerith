@@ -2,7 +2,7 @@ extern crate cerith;
 extern crate getopts;
 extern crate toml;
 
-use cerith::{IRCStream, get_version, DEFAULT_NICKNAME, DEFAULT_REALNAME, DEFAULT_USERNAME};
+use cerith::{IRCStream, get_version, Config};
 use getopts::Options;
 use std::env;
 use std::io::Read;
@@ -23,7 +23,7 @@ fn print_version() {
 
 fn parse_int(s: String) -> i32 {
     let n: Option<i32> = s.trim().parse().ok();
-    
+
     match n {
         Some(num) => num,
         None => 0,
@@ -68,22 +68,35 @@ fn main() {
         Err(why) => panic!("couldn't open {}: {}", path.display(), &why),
         Ok(file) => file,
     };
-        
+
     let mut contents = String::new();
     let _ = file.read_to_string(&mut contents);
     let val = contents.parse::<Value>().unwrap();
 
     let nickname = match val["bot"]["nickname"].as_str() {
         Some(s) => s.to_string(),
-        None => DEFAULT_NICKNAME.to_string(),
+        None => "".to_string(),
     };
     let username = match val["bot"]["username"].as_str() {
         Some(s) => s.to_string(),
-        None => DEFAULT_USERNAME.to_string(),
+        None => "".to_string(),
     };
     let realname = match val["bot"]["realname"].as_str() {
         Some(s) => s.to_string(),
-        None => DEFAULT_REALNAME.to_string(),
+        None => "".to_string(),
+    };
+    let usermode = match val["bot"]["usermode"].as_str() {
+        Some(s) => {
+            let mut u = 0;
+            if s.contains('i') {
+                u += 8
+            }
+            if s.contains('w') {
+                u += 4
+            }
+            u
+        }
+        None => -1,
     };
     let mut server = match val["connection"]["server"].as_str() {
         Some(s) => s.to_string(),
@@ -95,7 +108,7 @@ fn main() {
     };
 
     let mut admins = Vec::new();
-    
+
     match val["bot"]["admins"].as_array() {
         Some(ax) => {
             let v = Vec::<String>::new();
@@ -103,13 +116,13 @@ fn main() {
                 let a2 = match a.as_str() {
                     Some(a2) => a2.to_string(),
                     None => "".to_string(),
-                 };
+                };
                 if !a2.is_empty() {
                     admins.push(a2);
                 }
             }
             v
-        },
+        }
         None => Vec::<String>::new(),
     };
 
@@ -138,5 +151,7 @@ fn main() {
         Err(e) => panic!("{}", e),
     };
 
-    conn.run(nickname, username, realname, admins);
+    let cfg = Config::new(nickname, username, realname, usermode, admins);
+
+    conn.run(cfg);
 }

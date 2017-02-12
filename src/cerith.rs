@@ -21,7 +21,7 @@ static DEBUG: bool = true;
 pub const DEFAULT_NICKNAME: &'static str = "Cerith";
 pub const DEFAULT_REALNAME: &'static str = "Cerith";
 pub const DEFAULT_USERNAME: &'static str = "Cerith";
-static USERMODE: i32 = 8;
+pub const DEFAULT_USERMODE: i32 = 8; // 8 = +i, 12 = +iw
 static CTCP_DELIM: &'static str = "\x01";
 
 // Messages to be sent.
@@ -48,10 +48,12 @@ pub fn get_version() -> String {
     format!("{} {}", NAME, VERSION.unwrap_or(VERSION_NONE))
 }
 
+#[derive(Clone)]
 pub struct Config {
     nickname: String,
     username: String,
     realname: String,
+    usermode: i32,
     admins: Vec<String>,
 }
 
@@ -86,11 +88,7 @@ fn get_utc_time(msec: bool) -> String {
     let now = time::now_utc().to_timespec();
     let ss = now.sec.to_string();
     let ns = now.nsec.to_string();
-    if msec {
-        ss + &ns[0..3]
-    } else {
-        ss
-    }
+    if msec { ss + &ns[0..3] } else { ss }
 }
 
 fn get_local_time() -> String {
@@ -146,19 +144,30 @@ fn has_privilege(user: &User, admins: &Vec<String>) -> bool {
     false
 }
 
+impl Config {
+    pub fn new(nickname: String,
+               username: String,
+               realname: String,
+               usermode: i32,
+               admins: Vec<String>)
+               -> Config {
+        Config {
+            nickname: nickname,
+            username: username,
+            realname: realname,
+            usermode: usermode,
+            admins: admins,
+        }
+    }
+}
+
 impl IRCStream {
-    pub fn run(&mut self, nickname: String, username: String, realname: String, admins: Vec<String>) {
+    pub fn run(&mut self, config: Config) {
         let mut quit_msg = MSG_QUIT.to_string();
         let mut rcvd;
         let mut initialized = false;
 
-        let mut cfg = Config {
-            nickname: nickname.to_string(),
-            username: username.to_string(),
-            realname: realname.to_string(),
-            admins: admins,
-        };
-        self.config = cfg;
+        self.config = config.clone();
 
         loop {
             rcvd = self.read_response();
@@ -166,8 +175,8 @@ impl IRCStream {
             debug(format!("R {:?}", line));
 
             if !initialized {
-                self.send_nick(&nickname);
-                self.send_user(&username, USERMODE, &realname);
+                self.send_nick(&config.nickname);
+                self.send_user(&config.username, config.usermode, &config.realname);
                 initialized = true;
                 continue;
             }
@@ -199,10 +208,11 @@ impl IRCStream {
             Ok(x) => x,
             Err(_) => return Err(Error::new(ErrorKind::Other, "nope")),
         };
-        let config = Config{
+        let config = Config {
             nickname: DEFAULT_NICKNAME.to_string(),
             realname: DEFAULT_REALNAME.to_string(),
             username: DEFAULT_USERNAME.to_string(),
+            usermode: DEFAULT_USERMODE,
             admins: Vec::new(),
         };
         let socket = IRCStream {
@@ -252,6 +262,13 @@ impl IRCStream {
         sent
     }
 
+    fn send_raw2(&mut self, msg: String) -> Result<(), Error> {
+        let sent = self.stream.write_fmt(format_args!("{}", msg));
+        debug(format!("S {:?} {:?}", msg, sent));
+
+        sent
+    }
+
     fn send_ctcp(&mut self, to: &str, command: &str, msg: &str) {
         let delim = CTCP_DELIM.to_string();
         let ctcp = delim + command + " " + msg + CTCP_DELIM;
@@ -273,7 +290,7 @@ impl IRCStream {
     }
 
     fn send_nick(&mut self, msg: &str) {
-        self.send_raw(&(format!("NICK :{}\n", msg)));
+        self.send_raw2(format!("NICK :{}\n", msg));
     }
 
     fn send_notice(&mut self, to: &str, msg: &str) {
@@ -458,15 +475,13 @@ impl IRCStream {
                     let say_msg = caps_cmd.get(2).map_or("", |m| m.as_str());
                     if say_msg.is_empty() {
                         return Event::CommandCancelled;
+                    } else if say_msg.len() > 4 && &say_msg[0..4] == "/me " {
+                        let ctcp = "ACTION";
+                        debug(format!("ACT {}|{}|{}|{}", sender, msg, channel, &say_msg[4..]));
+                        self.send_ctcp(channel, ctcp, &say_msg[4..])
                     } else {
-                        if say_msg.len() > 4 && &say_msg[0..4] == "/me " {
-                            let ctcp = "ACTION";
-                            debug(format!("ACT {}|{}|{}|{}", sender, msg, channel, &say_msg[4..]));
-                            self.send_ctcp(channel, ctcp, &say_msg[4..])
-                        } else {
-                            debug(format!("SAY {}|{}|{}|{}", sender, msg, channel, say_msg));
-                            self.send_privmsg(channel, say_msg);
-                        }
+                        debug(format!("SAY {}|{}|{}|{}", sender, msg, channel, say_msg));
+                        self.send_privmsg(channel, say_msg);
                     }
                 } else {
                     debug(format!("CMD {}|{}", sender, msg));
