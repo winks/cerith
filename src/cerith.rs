@@ -1,9 +1,11 @@
 #![crate_name = "cerith"]
 #![crate_type = "lib"]
 
+extern crate rand;
 extern crate regex;
 extern crate time;
 
+use rand::Rng;
 use regex::Regex;
 use std::collections::HashSet;
 use std::fmt;
@@ -373,15 +375,17 @@ impl IRCStream {
     }
 
     fn handle_line(&mut self, line: &str) -> Event {
-        let event_priv = format!(":(.*) PRIVMSG {} :(.*)\r\n", self.config.nickname);
+        let event_priv_self = format!(":(.*) PRIVMSG {} :(.*)\r\n", self.config.nickname);
+        let event_priv_chan = format!(":(.*) PRIVMSG ((#|!)(\\S+)) :(.*)\r\n");
         let event_ping = "^PING\\s+:(.*)";
         let event_motd = ".*End of MOTD command.*";
         let event_nick = ":(.*) (.*) :Nickname is already in use.\r\n";
 
         let re_motd = Regex::new(&event_motd[..]).unwrap();
         let re_ping = Regex::new(&event_ping[..]).unwrap();
-        let re_priv = Regex::new(&event_priv[..]).unwrap();
         let re_nick = Regex::new(&event_nick[..]).unwrap();
+        let re_priv_self = Regex::new(&event_priv_self[..]).unwrap();
+        let re_priv_chan = Regex::new(&event_priv_chan[..]).unwrap();
 
         let event_cmd_join = format!("{}{}\\s+(.*)", self.config.prefix, CMD_JOIN);
         let event_cmd_part = format!("{}{}\\s+(\\S+)(\\s+)?(.*)?", self.config.prefix, CMD_PART);
@@ -416,11 +420,11 @@ impl IRCStream {
             self.send_pong(payload);
 
             return Event::PingPong;
-        } else if re_priv.is_match(line) {
-            let caps = re_priv.captures(line).unwrap();
+        } else if re_priv_self.is_match(line) {
+            let caps   = re_priv_self.captures(line).unwrap();
             let sender = caps.get(1).unwrap().as_str();
-            let msg = caps.get(2).map_or("", |m| m.as_str());
-            let user = parse_hostmask(sender);
+            let msg    = caps.get(2).map_or("", |m| m.as_str());
+            let user   = parse_hostmask(sender);
 
             if msg.len() < 1 {
                 debug(format!("PRIVMSG TOO SHORT {}", sender));
@@ -586,6 +590,24 @@ impl IRCStream {
                 debug(format!("PRIVMSG {}|{}", sender, msg));
 
                 return Event::PrivMsg;
+            }
+
+        } else if re_priv_chan.is_match(line) {
+            let caps    = re_priv_chan.captures(line).unwrap();
+            let sender  = caps.get(1).unwrap().as_str();
+            let channel = caps.get(2).unwrap().as_str();
+            let msg     = caps.get(5).map_or("", |m| m.as_str());
+            let user    = parse_hostmask(sender);
+
+            if msg.len() < 1 {
+                debug(format!("PRIVMSG TOO SHORT {}", sender));
+                return Event::PrivMsg;
+            }
+            let mut rng = rand::thread_rng();
+
+            if false {
+            } else {
+               debug(format!("PRIVMSG {}||", line ));
             }
         }
 
