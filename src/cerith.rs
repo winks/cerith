@@ -59,6 +59,13 @@ pub struct Server {
 }
 
 #[derive(Clone, Debug)]
+pub struct Reaction {
+    trigger: String,
+    action: String,
+    occur: i32,
+}
+
+#[derive(Clone, Debug)]
 pub struct Config {
     nickname: String,
     username: String,
@@ -67,6 +74,7 @@ pub struct Config {
     prefix: String,
     admins: Vec<String>,
     altnicks: Vec<String>,
+    reactions: Vec<Reaction>,
 }
 
 pub struct IRCStream {
@@ -159,6 +167,16 @@ impl Server {
     }
 }
 
+impl Reaction {
+    pub fn new(trigger: String, action: String, occur: i32) -> Reaction {
+        Reaction {
+            trigger: trigger,
+            action: action,
+            occur: occur
+        }
+    }
+}
+
 impl fmt::Display for Server {
     // This trait requires `fmt` with this exact signature.
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -173,7 +191,8 @@ impl Config {
                usermode: i32,
                prefix: String,
                admins: Vec<String>,
-               altnicks: Vec<String>)
+               altnicks: Vec<String>,
+               reactions: Vec<Reaction>)
                -> Config {
         Config {
             nickname: nickname,
@@ -183,6 +202,7 @@ impl Config {
             prefix: prefix,
             admins: admins,
             altnicks: altnicks,
+            reactions: reactions,
         }
     }
 }
@@ -267,6 +287,7 @@ impl IRCStream {
             prefix: DEFAULT_PREFIX.to_string(),
             admins: Vec::new(),
             altnicks: Vec::new(),
+            reactions: Vec::new(),
         };
         let socket = IRCStream {
             stream: tcp_stream,
@@ -587,7 +608,7 @@ impl IRCStream {
                     self.send_ctcp_reply(sender, command, &reply[..]);
                 }
             } else {
-                debug(format!("PRIVMSG {}|{}", sender, msg));
+                debug(format!("PRIVMSG_FROM {}|{}", sender, msg));
 
                 return Event::PrivMsg;
             }
@@ -603,11 +624,54 @@ impl IRCStream {
                 debug(format!("PRIVMSG TOO SHORT {}", sender));
                 return Event::PrivMsg;
             }
-            let mut rng = rand::thread_rng();
 
-            if false {
-            } else {
-               debug(format!("PRIVMSG {}||", line ));
+            let tpl_pat = ".*\\{(nick|ident|host|channel|msg)\\}.*";
+            let tpl_re = Regex::new(tpl_pat).unwrap();
+            let mut triggered = false;
+
+            for reaction in self.config.reactions.clone() {
+                if triggered {
+                    continue;
+                }
+                let matcher     = reaction.trigger;
+                let re_reaction = Regex::new(&matcher[..]).unwrap();
+                let mut new_action = reaction.action.clone();
+                if re_reaction.is_match(msg) {
+                    triggered = true;
+                    debug(format!("PRIVMSG_CHAN |({}) => {}|{}", matcher, new_action, msg));
+                    let mut num: i32 = 0;
+                    if reaction.occur > 0 {
+                        let mut rng = rand::thread_rng();
+                        num = rng.gen_range(0, 100);
+                    }
+
+                    if num <= reaction.occur {
+                        if tpl_re.is_match(&reaction.action) {
+                            let caps = tpl_re.captures(&reaction.action).unwrap();
+                            let result = caps.get(1);
+                            let what = caps.get(1).map_or(String::new(), |v| ["{", v.as_str(), "}"].join(""));
+                            let replace = match result {
+                                Some(a) => {
+                                    match a.as_str() {
+                                        "nick"    => user.nick,
+                                        "ident"   => user.ident,
+                                        "host"    => user.host,
+                                        "channel" => channel,
+                                        "msg"     => msg,
+                                        _           => "",
+                                    }
+                                }
+                                None => "",
+                            };
+                            new_action = new_action.replace(&what, replace);
+                        }
+                        self.send_privmsg(channel, &new_action);
+                    }
+                }
+            }
+
+            if !triggered {
+               debug(format!("PRIVMSG_CHAN <{}>|{}", sender, line));
             }
         }
 
