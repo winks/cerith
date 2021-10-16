@@ -9,6 +9,7 @@ use rand::Rng;
 use regex::Regex;
 use std::collections::HashSet;
 use std::fmt;
+use std::fs::OpenOptions;
 use std::io::{Error, ErrorKind, Read, Write};
 use std::net::TcpStream;
 use std::thread;
@@ -63,6 +64,7 @@ pub struct Reaction {
     trigger: String,
     action: String,
     occur: i32,
+    log: String,
 }
 
 #[derive(Clone, Debug)]
@@ -168,11 +170,12 @@ impl Server {
 }
 
 impl Reaction {
-    pub fn new(trigger: String, action: String, occur: i32) -> Reaction {
+    pub fn new(trigger: String, action: String, occur: i32, log: String) -> Reaction {
         Reaction {
             trigger: trigger,
             action: action,
-            occur: occur
+            occur: occur,
+            log: log,
         }
     }
 }
@@ -645,7 +648,20 @@ impl IRCStream {
                         num = rng.gen_range(0..=100);
                     }
 
-                    if num <= reaction.occur {
+                    if reaction.log.len() > 0 {
+                        let mut log_file = OpenOptions::new().write(true).append(true).open(reaction.log).unwrap();
+                        let mut log_msg = get_utc_time(false);
+                        log_msg.push_str(" ");
+                        log_msg.push_str(channel);
+                        log_msg.push_str(" ");
+                        log_msg.push_str(user.nick);
+                        log_msg.push_str(" ");
+                        log_msg.push_str(msg);
+                        log_msg.push_str("\n");
+                        debug(format!("Logging reaction: {}", log_msg));
+                        log_file.write(log_msg.as_bytes());
+                    }
+                    if num <= reaction.occur && reaction.action.len() > 0 {
                         if tpl_re.is_match(&reaction.action) {
                             let caps = tpl_re.captures(&reaction.action).unwrap();
                             let result = caps.get(1);
