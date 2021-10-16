@@ -12,3 +12,9 @@ server_2 = ["irc.uni-erlangen.de", "6668"]
 
 [misc]
 prefix = "!"
+
+[reactions.hello]
+trigger = "hello"
+action = "Hello, {nick}!"
+occur = 100
+

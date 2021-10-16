@@ -217,29 +217,34 @@ fn parse_servers(val: &Value) -> Vec<Server> {
 
 fn parse_reactions(val: &Value) -> Vec<Reaction> {
     let mut reactions = Vec::<Reaction>::new();
-    for (name, _section) in val["reactions"].as_table().unwrap() {
-        let mut trigger = String::new();
-        let mut action= String::new();
-        let mut occur: i32 = 0;
-        for (k, v) in val["reactions"][name].as_table().unwrap() {
-            match v.as_str() {
-                Some(a) => {
-                    if k == "trigger" {
-                        trigger = a.to_string();
-                    } else if k == "action" {
-                        action = a.to_string();
-                    } else if k == "occur" {
-                        occur = parse_int(a.to_string());
+    match val.get("reactions") {
+        None => reactions,
+        Some(xr) => {
+            for (name, _section) in xr.as_table().unwrap() {
+                let mut trigger = String::new();
+                let mut action= String::new();
+                let mut occur: i32 = 0;
+                for (k, v) in val["reactions"][name].as_table().unwrap() {
+                    match v.as_str() {
+                        Some(a) => {
+                            if k == "trigger" {
+                                trigger = a.to_string();
+                            } else if k == "action" {
+                                action = a.to_string();
+                            } else if k == "occur" {
+                                occur = parse_int(a.to_string());
+                            }
+                        }
+                        None => continue,
                     }
                 }
-                None => continue,
+                if trigger.len() > 0 && action.len() > 0 && occur >= 0 && occur <= 100 {
+                    let r = Reaction::new(trigger, action, occur);
+                    reactions.push(r);
+                }
             }
-        }
-        if trigger.len() > 0 && action.len() > 0 && occur >= 0 && occur <= 100 {
-            let r = Reaction::new(trigger, action, occur);
-            reactions.push(r);
+
+            reactions
         }
     }
-
-    reactions
 }

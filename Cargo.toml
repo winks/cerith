@@ -2,6 +2,7 @@
 name = "cerith"
 version = "0.1.0"
 authors = ["Florian Anderiasch <fa@art-core.org>"]
+edition = "2018"
 
 [lib]
 name = "cerith"
@@ -12,8 +13,8 @@ name = "cerith"
 path = "src/bot.rs"
 
 [dependencies]
-getopts = "0.2"
-rand = "0.4"
-regex = "0.2"
+getopts = "0.2.21"
+rand = "0.8"
+regex = "1.5"
 time = "0.1"
-toml = "0.3"
+toml = "0.5"

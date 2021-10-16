@@ -642,7 +642,7 @@ impl IRCStream {
                     let mut num: i32 = 0;
                     if reaction.occur > 0 {
                         let mut rng = rand::thread_rng();
-                        num = rng.gen_range(0, 100);
+                        num = rng.gen_range(0..=100);
                     }
 
                     if num <= reaction.occur {
