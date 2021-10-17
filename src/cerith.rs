@@ -31,7 +31,6 @@ pub const DEFAULT_PREFIX: &'static str = "!";
 static CTCP_DELIM: &'static str = "\x01";
 
 // Messages to be sent.
-static MSG_QUIT: &'static str = "Fin.";
 static MSG_GREET: &'static str = "Hello World!";
 static MSG_IQUIT: &'static str = ":(";
 static MSG_NOPE: &'static str = "You're not the boss of me.";
@@ -92,6 +91,7 @@ struct User<'a> {
     nick: &'a str,
     ident: &'a str,
     host: &'a str,
+    full: &'a str,
 }
 
 enum Event {
@@ -141,6 +141,7 @@ fn parse_hostmask(s: &str) -> User {
             nick: nick.as_str(),
             ident: ident.as_str(),
             host: host.as_str(),
+            full: s,
         }
     } else {
         panic!("Cannot parse host mask: {}", s);
@@ -212,7 +213,7 @@ impl Config {
 
 impl IRCStream {
     pub fn run(&mut self, config: Config) {
-        let mut quit_msg = MSG_QUIT.to_string();
+        let quit_msg : String;
         let mut rcvd;
         let mut initialized = false;
 
@@ -451,7 +452,7 @@ impl IRCStream {
             let user   = parse_hostmask(sender);
 
             if msg.len() < 1 {
-                debug(format!("PRIVMSG TOO SHORT {}", sender));
+                debug(format!("PRIVMSG TOO SHORT {}", user.full));
                 return Event::PrivMsg;
             }
 
@@ -585,30 +586,37 @@ impl IRCStream {
                 let payload = &msg[1..len - 1];
                 debug(format!("PRIVMSG CTCP:OK {}|{}", sender, payload));
 
-                if payload == "VERSION" {
+                if payload == "CLIENTINFO" {
+                    let command = "CLIENTINFO";
+                    let reply = "VERSION TIME PING";
+                    debug(format!("PRIVMSG CTCP:{} {}|{}", command, sender, reply));
+                    self.send_ctcp_reply(user.nick, command, &reply[..]);
+
+                    return Event::CTCP;
+                } else if payload == "VERSION" {
                     let command = "VERSION";
                     let reply = get_version();
                     debug(format!("PRIVMSG CTCP:{} {}|{}", command, sender, reply));
-                    self.send_ctcp_reply(sender, command, &reply[..]);
+                    self.send_ctcp_reply(user.nick, command, &reply[..]);
 
                     return Event::CTCP;
                 } else if payload == "TIME" {
                     let command = "TIME";
                     let reply = get_local_time();
                     debug(format!("PRIVMSG CTCP:{} {}|{}", command, sender, reply));
-                    self.send_ctcp_reply(sender, command, &reply[..]);
+                    self.send_ctcp_reply(user.nick, command, &reply[..]);
 
                     return Event::CTCP;
-                } else if &payload[0..4] == "PING" {
+                } else if payload.len() > 4 && &payload[0..4] == "PING" {
                     if payload.len() < 6 {
                         return Event::Unknown;
                     }
-                    // let rest = &payload[5..];
                     let command = "PING";
-
-                    let reply = get_utc_time(true);
+                    let reply = &payload[4..];
                     debug(format!("PRIVMSG CTCP:{} {}|{}", command, sender, reply));
-                    self.send_ctcp_reply(sender, command, &reply[..]);
+                    self.send_ctcp_reply(user.nick, command, reply);
+
+                    return Event::CTCP;
                 }
             } else {
                 debug(format!("PRIVMSG_FROM {}|{}", sender, msg));
@@ -644,7 +652,7 @@ impl IRCStream {
                     debug(format!("PRIVMSG_CHAN |({}) => {}|{}", matcher, new_action, msg));
 
                     if reaction.log.len() > 0 {
-                        let mut log_file = OpenOptions::new().write(true).append(true).open(reaction.log).unwrap();
+                        let mut log_file = OpenOptions::new().write(true).append(true).open(reaction.log.clone()).unwrap();
                         let mut log_msg = get_utc_time(false);
                         log_msg.push_str(" ");
                         log_msg.push_str(channel);
@@ -654,7 +662,10 @@ impl IRCStream {
                         log_msg.push_str(msg);
                         log_msg.push_str("\n");
                         debug(format!("Logging reaction: {}", log_msg));
-                        log_file.write(log_msg.as_bytes());
+                        match log_file.write(log_msg.as_bytes()) {
+                            Err(f) => debug(format!("Error writing to file {}: {}", reaction.log, f)),
+                            Ok(_x) => {},
+                        }
                     }
                     let mut num: i32 = 0;
                     if reaction.occur > 0 {
