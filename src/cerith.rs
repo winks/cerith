@@ -642,11 +642,6 @@ impl IRCStream {
                 if re_reaction.is_match(msg) {
                     triggered = true;
                     debug(format!("PRIVMSG_CHAN |({}) => {}|{}", matcher, new_action, msg));
-                    let mut num: i32 = 0;
-                    if reaction.occur > 0 {
-                        let mut rng = rand::thread_rng();
-                        num = rng.gen_range(0..=100);
-                    }
 
                     if reaction.log.len() > 0 {
                         let mut log_file = OpenOptions::new().write(true).append(true).open(reaction.log).unwrap();
@@ -661,7 +656,12 @@ impl IRCStream {
                         debug(format!("Logging reaction: {}", log_msg));
                         log_file.write(log_msg.as_bytes());
                     }
-                    if num <= reaction.occur && reaction.action.len() > 0 {
+                    let mut num: i32 = 0;
+                    if reaction.occur > 0 {
+                        let mut rng = rand::thread_rng();
+                        num = rng.gen_range(0..=100);
+                    }
+                    if num < reaction.occur && reaction.action.len() > 0 {
                         if tpl_re.is_match(&reaction.action) {
                             let caps = tpl_re.captures(&reaction.action).unwrap();
                             let result = caps.get(1);

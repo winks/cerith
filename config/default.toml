@@ -11,10 +11,16 @@ server_1 = ["irc.uni-erlangen.de", "6667"]
 server_2 = ["irc.uni-erlangen.de", "6668"]
 
 [misc]
+# prefix for the bot commands
 prefix = "!"
 
 [reactions.hello]
+# trigger is kind of a rust regex
 trigger = "hello"
+# action will be sent to the channel/query where trigger came, can be empty
 action = "Hello, {nick}!"
+# occur is the probability. 100 = always, down to 0 (how useful)
 occur = 100
+# path to a filename where this reaction will be logged
+log = "hello.log"
 
