@@ -17,11 +17,7 @@ fn print_version() {
 
 fn parse_int(s: String) -> i32 {
     let n: Option<i32> = s.trim().parse().ok();
-
-    match n {
-        Some(num) => num,
-        None => 0,
-    }
+    n.unwrap_or(0)
 }
 
 fn main() {
@@ -73,12 +69,10 @@ fn main() {
     // overwrite servers from config with CLI options
     if !server_opt.is_empty() {
         let server = Server::new(server_opt.to_string(), port_opt);
-        servers = Vec::<Server>::new();
-        servers.push(server);
+        servers = vec![server];
     }
 
-    for i in 0..servers.len() {
-        let srv = &servers[i];
+    for srv in &servers {
         let mut conn = match IRCStream::connect(srv) {
             Ok(s) => s,
             Err(_) => {
@@ -94,7 +88,7 @@ fn main() {
 fn read_config_file(filename: String) -> Value {
     // check and read config file
     let path = Path::new(&filename);
-    let mut file = match File::open(&path) {
+    let mut file = match File::open(path) {
         Err(why) => panic!("ERROR: Couldn't open {}: {}", path.display(), &why),
         Ok(file) => file,
     };
@@ -183,7 +177,7 @@ fn parse_toml(val: &Value) -> Config {
         prefix,
         admins,
         altnicks,
-        parse_reactions(&val),
+        parse_reactions(val),
     )
 }
 
@@ -239,7 +233,7 @@ fn parse_reactions(val: &Value) -> Vec<Reaction> {
                         None => continue,
                     }
                 }
-                if trigger.len() > 0 && occur >= 0 && occur <= 100 {
+                if !trigger.is_empty() && (0..=100).contains(&occur) {
                     let r = Reaction::new(trigger, action, occur, log);
                     reactions.push(r);
                 }
