@@ -1,9 +1,9 @@
-use cerith::{IRCStream, get_version, Config, Server, Reaction, DEFAULT_PORT};
+use cerith::{get_version, Config, IRCStream, Reaction, Server, DEFAULT_PORT};
 use getopts::Options;
 use std::env;
+use std::fs::File;
 use std::io::Read;
 use std::path::Path;
-use std::fs::File;
 use toml::Value;
 
 fn print_usage(program: &str, opts: Options) {
@@ -175,14 +175,16 @@ fn parse_toml(val: &Value) -> Config {
         None => Vec::<String>::new(),
     };
 
-    Config::new(nickname,
-                username,
-                realname,
-                usermode,
-                prefix,
-                admins,
-                altnicks,
-                parse_reactions(&val))
+    Config::new(
+        nickname,
+        username,
+        realname,
+        usermode,
+        prefix,
+        admins,
+        altnicks,
+        parse_reactions(&val),
+    )
 }
 
 fn parse_servers(val: &Value) -> Vec<Server> {

@@ -189,15 +189,16 @@ impl fmt::Display for Server {
 }
 
 impl Config {
-    pub fn new(nickname: String,
-               username: String,
-               realname: String,
-               usermode: i32,
-               prefix: String,
-               admins: Vec<String>,
-               altnicks: Vec<String>,
-               reactions: Vec<Reaction>)
-               -> Config {
+    pub fn new(
+        nickname: String,
+        username: String,
+        realname: String,
+        usermode: i32,
+        prefix: String,
+        admins: Vec<String>,
+        altnicks: Vec<String>,
+        reactions: Vec<Reaction>,
+    ) -> Config {
         Config {
             nickname: nickname,
             username: username,
@@ -213,7 +214,7 @@ impl Config {
 
 impl IRCStream {
     pub fn run(&mut self, config: Config) {
-        let quit_msg : String;
+        let quit_msg: String;
         let mut rcvd;
         let mut initialized = false;
 
@@ -310,9 +311,10 @@ impl IRCStream {
         let lf = 0x0a;
         let mut line_buffer: Vec<u8> = Vec::new();
         let mut all: Vec<String> = Vec::new();
-        while line_buffer.len() < 2 ||
-              (line_buffer[line_buffer.len() - 1] != lf &&
-               line_buffer[line_buffer.len() - 2] != cr) {
+        while line_buffer.len() < 2
+            || (line_buffer[line_buffer.len() - 1] != lf
+                && line_buffer[line_buffer.len() - 2] != cr)
+        {
             let byte_buffer: &mut [u8] = &mut [0];
             match self.stream.read(byte_buffer) {
                 Ok(_) => {}
@@ -446,10 +448,10 @@ impl IRCStream {
 
             return Event::PingPong;
         } else if re_priv_self.is_match(line) {
-            let caps   = re_priv_self.captures(line).unwrap();
+            let caps = re_priv_self.captures(line).unwrap();
             let sender = caps.get(1).unwrap().as_str();
-            let msg    = caps.get(2).map_or("", |m| m.as_str());
-            let user   = parse_hostmask(sender);
+            let msg = caps.get(2).map_or("", |m| m.as_str());
+            let user = parse_hostmask(sender);
 
             if msg.len() < 1 {
                 debug(format!("PRIVMSG TOO SHORT {}", user.full));
@@ -489,14 +491,19 @@ impl IRCStream {
                     let rest = caps_cmd.get(2).map_or("", |m| m.as_str());
 
                     if rest.len() < 2 {
-                        let lists: HashSet<_> = ["I" /* invitations masks */,
-                                                 "e" /* exemptions masks */]
-                            .iter()
-                            .cloned()
-                            .collect();
+                        let lists: HashSet<_> = [
+                            "I", /* invitations masks */
+                            "e", /* exemptions masks */
+                        ]
+                        .iter()
+                        .cloned()
+                        .collect();
 
                         if rest.len() == 1 && lists.contains(rest) {
-                            debug(format!("CHANMODE L {}|{}|{}|{}", sender, msg, channel, rest));
+                            debug(format!(
+                                "CHANMODE L {}|{}|{}|{}",
+                                sender, msg, channel, rest
+                            ));
                             self.send_mode(channel, rest);
 
                             return Event::Command;
@@ -513,28 +520,40 @@ impl IRCStream {
                     }
 
                     // https://www.alien.net.au/irc/chanmodes.html
-                    let arity_0: HashSet<_> =
-                        ["c" /* no colors */, "C" /* no ctcp */,
-                         "m" /* moderated */, "n" /* no external messages */,
-                         "r" /* registered users only */,
-                         "R" /* registered users only */, "s" /* secret */,
-                         "S" /* strip colors */, "t" /* topic lock */,
-                         "z" /* secure joins only */]
-                            .iter()
-                            .cloned()
-                            .collect();
+                    let arity_0: HashSet<_> = [
+                        "c", /* no colors */
+                        "C", /* no ctcp */
+                        "m", /* moderated */
+                        "n", /* no external messages */
+                        "r", /* registered users only */
+                        "R", /* registered users only */
+                        "s", /* secret */
+                        "S", /* strip colors */
+                        "t", /* topic lock */
+                        "z", /* secure joins only */
+                    ]
+                    .iter()
+                    .cloned()
+                    .collect();
 
-                    let arity_1: HashSet<_> = ["b" /* ban */, "h" /* half-op */,
-                                               "k" /* channel key */,
-                                               "l" /* channel limit */,
-                                               "o" /* operator */, "v" /* voice */]
-                        .iter()
-                        .cloned()
-                        .collect();
+                    let arity_1: HashSet<_> = [
+                        "b", /* ban */
+                        "h", /* half-op */
+                        "k", /* channel key */
+                        "l", /* channel limit */
+                        "o", /* operator */
+                        "v", /* voice */
+                    ]
+                    .iter()
+                    .cloned()
+                    .collect();
 
                     if arity_0.contains(second) {
                         let mode = &rest[0..2];
-                        debug(format!("CHANMODE 0 {}|{}|{}|{}", sender, msg, channel, mode));
+                        debug(format!(
+                            "CHANMODE 0 {}|{}|{}|{}",
+                            sender, msg, channel, mode
+                        ));
                         self.send_mode(channel, mode);
                     } else if arity_1.contains(second) {
                         let mode = &rest[0..2];
@@ -542,12 +561,10 @@ impl IRCStream {
                             return Event::CommandCancelled;
                         }
                         let arg = &rest[3..].trim();
-                        debug(format!("CHANMODE 1 {}|{}|{}|{}|{}",
-                                      sender,
-                                      msg,
-                                      channel,
-                                      mode,
-                                      arg));
+                        debug(format!(
+                            "CHANMODE 1 {}|{}|{}|{}|{}",
+                            sender, msg, channel, mode, arg
+                        ));
                         self.send_mode(channel, &rest[..]);
                     } else {
                         debug(format!("CHANMODE ? {}|{}|{}", sender, msg, channel));
@@ -565,7 +582,13 @@ impl IRCStream {
                         return Event::CommandCancelled;
                     } else if say_msg.len() > 4 && &say_msg[0..4] == "/me " {
                         let ctcp = "ACTION";
-                        debug(format!("ACT {}|{}|{}|{}", sender, msg, channel, &say_msg[4..]));
+                        debug(format!(
+                            "ACT {}|{}|{}|{}",
+                            sender,
+                            msg,
+                            channel,
+                            &say_msg[4..]
+                        ));
                         self.send_ctcp(channel, ctcp, &say_msg[4..])
                     } else {
                         debug(format!("SAY {}|{}|{}|{}", sender, msg, channel, say_msg));
@@ -623,13 +646,12 @@ impl IRCStream {
 
                 return Event::PrivMsg;
             }
-
         } else if re_priv_chan.is_match(line) {
-            let caps    = re_priv_chan.captures(line).unwrap();
-            let sender  = caps.get(1).unwrap().as_str();
+            let caps = re_priv_chan.captures(line).unwrap();
+            let sender = caps.get(1).unwrap().as_str();
             let channel = caps.get(2).unwrap().as_str();
-            let msg     = caps.get(5).map_or("", |m| m.as_str());
-            let user    = parse_hostmask(sender);
+            let msg = caps.get(5).map_or("", |m| m.as_str());
+            let user = parse_hostmask(sender);
 
             if msg.len() < 1 {
                 debug(format!("PRIVMSG TOO SHORT {}", sender));
@@ -644,15 +666,22 @@ impl IRCStream {
                 if triggered {
                     continue;
                 }
-                let matcher     = reaction.trigger;
+                let matcher = reaction.trigger;
                 let re_reaction = Regex::new(&matcher[..]).unwrap();
                 let mut new_action = reaction.action.clone();
                 if re_reaction.is_match(msg) {
                     triggered = true;
-                    debug(format!("PRIVMSG_CHAN |({}) => {}|{}", matcher, new_action, msg));
+                    debug(format!(
+                        "PRIVMSG_CHAN |({}) => {}|{}",
+                        matcher, new_action, msg
+                    ));
 
                     if reaction.log.len() > 0 {
-                        let mut log_file = OpenOptions::new().write(true).append(true).open(reaction.log.clone()).unwrap();
+                        let mut log_file = OpenOptions::new()
+                            .write(true)
+                            .append(true)
+                            .open(reaction.log.clone())
+                            .unwrap();
                         let mut log_msg = get_utc_time(false);
                         log_msg.push_str(" ");
                         log_msg.push_str(channel);
@@ -663,8 +692,10 @@ impl IRCStream {
                         log_msg.push_str("\n");
                         debug(format!("Logging reaction: {}", log_msg));
                         match log_file.write(log_msg.as_bytes()) {
-                            Err(f) => debug(format!("Error writing to file {}: {}", reaction.log, f)),
-                            Ok(_x) => {},
+                            Err(f) => {
+                                debug(format!("Error writing to file {}: {}", reaction.log, f))
+                            }
+                            Ok(_x) => {}
                         }
                     }
                     let mut num: i32 = 0;
@@ -676,18 +707,18 @@ impl IRCStream {
                         if tpl_re.is_match(&reaction.action) {
                             let caps = tpl_re.captures(&reaction.action).unwrap();
                             let result = caps.get(1);
-                            let what = caps.get(1).map_or(String::new(), |v| ["{", v.as_str(), "}"].join(""));
+                            let what = caps
+                                .get(1)
+                                .map_or(String::new(), |v| ["{", v.as_str(), "}"].join(""));
                             let replace = match result {
-                                Some(a) => {
-                                    match a.as_str() {
-                                        "nick"    => user.nick,
-                                        "ident"   => user.ident,
-                                        "host"    => user.host,
-                                        "channel" => channel,
-                                        "msg"     => msg,
-                                        _           => "",
-                                    }
-                                }
+                                Some(a) => match a.as_str() {
+                                    "nick" => user.nick,
+                                    "ident" => user.ident,
+                                    "host" => user.host,
+                                    "channel" => channel,
+                                    "msg" => msg,
+                                    _ => "",
+                                },
                                 None => "",
                             };
                             new_action = new_action.replace(&what, replace);
@@ -698,7 +729,7 @@ impl IRCStream {
             }
 
             if !triggered {
-               debug(format!("PRIVMSG_CHAN <{}>|{}", sender, line));
+                debug(format!("PRIVMSG_CHAN <{}>|{}", sender, line));
             }
         }
 
