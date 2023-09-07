@@ -1,7 +1,3 @@
-extern crate cerith;
-extern crate getopts;
-extern crate toml;
-
 use cerith::{IRCStream, get_version, Config, Server, Reaction, DEFAULT_PORT};
 use getopts::Options;
 use std::env;

@@ -1,19 +1,16 @@
 #![crate_name = "cerith"]
 #![crate_type = "lib"]
 
-extern crate rand;
-extern crate regex;
-extern crate time;
-
 use rand::Rng;
 use regex::Regex;
 use std::collections::HashSet;
+use std::convert::TryFrom;
 use std::fmt;
 use std::fs::OpenOptions;
 use std::io::{Error, ErrorKind, Read, Write};
 use std::net::TcpStream;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 // General config stuff
 const VERSION: Option<&'static str> = option_env!("CARGO_PKG_VERSION");
@@ -108,25 +105,28 @@ enum Event {
 }
 
 fn get_utc_time(msec: bool) -> String {
-    let now = time::now_utc().to_timespec();
-    let ss = now.sec.to_string();
-    let ns = now.nsec.to_string();
-    if msec { ss + &ns[0..3] } else { ss }
+    let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH);
+    match now {
+        Ok(stime) => {
+            let ss = stime.as_secs().to_string();
+            let ms = stime.as_millis().to_string();
+            if msec { ms } else { ss }
+        },
+        Err(_) => "0".to_string(),
+    }
 }
 
 fn get_local_time() -> String {
-    let now = time::now_utc();
-    //
-    // This would need %Z support in strftime on Windows :(
-    // let now = time::now();
-    // let fmt = "%a %d %b %Y %H:%M:%S %Z";
-    // let result = match now.strftime(fmt) {
-    // Ok(v) => v,
-    // _     => now.rfc822(),
-    // };
-    // return format!("{}", result).replace(",","");
-    //
-    format!("{}", now.rfc822()).replace(",", "")
+    let now = SystemTime::now();
+    let utc = time::OffsetDateTime::UNIX_EPOCH
+        + time::Duration::try_from(now.duration_since(std::time::UNIX_EPOCH).unwrap()).unwrap();
+    let local = utc.to_offset(time::UtcOffset::local_offset_at(utc).unwrap());
+    let rv = local.format(
+        time::macros::format_description!("[weekday repr:short] [day] [month repr:short] [year] [hour]:[minute]:[second] [offset_hour][offset_minute]"));
+    match rv {
+        Ok(r) => r,
+        _ => "0".to_string(),
+    }
 }
 
 fn parse_hostmask(s: &str) -> User {
