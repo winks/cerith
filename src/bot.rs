@@ -215,7 +215,7 @@ fn parse_reactions(val: &Value) -> Vec<Reaction> {
             for (name, _section) in xr.as_table().unwrap() {
                 let mut trigger = String::new();
                 let mut action = String::new();
-                let mut occur: i32 = 0;
+                let mut occur: i64 = 0;
                 let mut log = String::new();
                 for (k, v) in val["reactions"][name].as_table().unwrap() {
                     match v.as_str() {
@@ -224,13 +224,20 @@ fn parse_reactions(val: &Value) -> Vec<Reaction> {
                                 trigger = a.to_string();
                             } else if k == "action" {
                                 action = a.to_string();
-                            } else if k == "occur" {
-                                occur = parse_int(a.to_string());
                             } else if k == "log" {
                                 log = a.to_string();
                             }
                         }
-                        None => continue,
+                        None => {
+                            match v.as_integer() {
+                                Some(a) => {
+                                    if k == "occur" {
+                                        occur = a
+                                    }
+                                },
+                                None => continue,
+                            }
+                        }
                     }
                 }
                 if !trigger.is_empty() && (0..=100).contains(&occur) {

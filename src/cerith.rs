@@ -59,7 +59,7 @@ pub struct Server {
 pub struct Reaction {
     trigger: String,
     action: String,
-    occur: i32,
+    occur: i64,
     log: String,
 }
 
@@ -171,7 +171,7 @@ impl Server {
 }
 
 impl Reaction {
-    pub fn new(trigger: String, action: String, occur: i32, log: String) -> Reaction {
+    pub fn new(trigger: String, action: String, occur: i64, log: String) -> Reaction {
         Reaction {
             trigger: trigger,
             action: action,
@@ -672,7 +672,7 @@ impl IRCStream {
                 if re_reaction.is_match(msg) {
                     triggered = true;
                     debug(format!(
-                        "PRIVMSG_CHAN |({}) => {}|{}",
+                        "PRIVMSG_CHAN |Reaction: ({}) => {}|{}",
                         matcher, new_action, msg
                     ));
 
@@ -698,12 +698,13 @@ impl IRCStream {
                             Ok(_x) => {}
                         }
                     }
-                    let mut num: i32 = 0;
+                    let mut num: i64 = 100;
                     if reaction.occur > 0 {
                         let mut rng = rand::thread_rng();
                         num = rng.gen_range(0..=100);
                     }
-                    if num < reaction.occur && reaction.action.len() > 0 {
+                    debug(format!("Reaction rnd: o: {}% roll: {}", reaction.occur, num));
+                    if num <= reaction.occur && reaction.action.len() > 0 {
                         if tpl_re.is_match(&reaction.action) {
                             let caps = tpl_re.captures(&reaction.action).unwrap();
                             let result = caps.get(1);
