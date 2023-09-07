@@ -14,30 +14,30 @@ use std::time::{Duration, SystemTime};
 
 // General config stuff
 const VERSION: Option<&'static str> = option_env!("CARGO_PKG_VERSION");
-static VERSION_NONE: &'static str = "unknown";
-static NAME: &'static str = "Cerith";
+static VERSION_NONE: &str = "unknown";
+static NAME: &str = "Cerith";
 static DEBUG: bool = true;
 pub const DEFAULT_PORT: i32 = 6667;
 
 // IRC config stuff
-pub const DEFAULT_NICKNAME: &'static str = "Cerith";
-pub const DEFAULT_REALNAME: &'static str = "Cerith";
-pub const DEFAULT_USERNAME: &'static str = "Cerith";
+pub const DEFAULT_NICKNAME: &str = "Cerith";
+pub const DEFAULT_REALNAME: &str = "Cerith";
+pub const DEFAULT_USERNAME: &str = "Cerith";
 pub const DEFAULT_USERMODE: i32 = 8; // 8 = +i, 12 = +iw
-pub const DEFAULT_PREFIX: &'static str = "!";
-static CTCP_DELIM: &'static str = "\x01";
+pub const DEFAULT_PREFIX: &str = "!";
+static CTCP_DELIM: &str = "\x01";
 
 // Messages to be sent.
-static MSG_GREET: &'static str = "Hello World!";
-static MSG_IQUIT: &'static str = ":(";
-static MSG_NOPE: &'static str = "You're not the boss of me.";
+static MSG_GREET: &str = "Hello World!";
+static MSG_IQUIT: &str = ":(";
+static MSG_NOPE: &str = "You're not the boss of me.";
 
 // Commands that are recognized
-static CMD_QUIT: &'static str = "quit";
-static CMD_JOIN: &'static str = "join";
-static CMD_PART: &'static str = "part";
-static CMD_SAY: &'static str = "say";
-static CMD_MODE: &'static str = "mode";
+static CMD_QUIT: &str = "quit";
+static CMD_JOIN: &str = "join";
+static CMD_PART: &str = "part";
+static CMD_SAY: &str = "say";
+static CMD_MODE: &str = "mode";
 
 fn debug(msg: String) {
     if DEBUG {
@@ -95,7 +95,7 @@ enum Event {
     Command,
     CommandCancelled,
     Connected,
-    CTCP,
+    Ctcp,
     NickTaken(String),
     PingPong,
     PrivMsg,
@@ -110,8 +110,12 @@ fn get_utc_time(msec: bool) -> String {
         Ok(stime) => {
             let ss = stime.as_secs().to_string();
             let ms = stime.as_millis().to_string();
-            if msec { ms } else { ss }
-        },
+            if msec {
+                ms
+            } else {
+                ss
+            }
+        }
         Err(_) => "0".to_string(),
     }
 }
@@ -163,20 +167,17 @@ fn has_privilege(user: &User, admins: &[String]) -> bool {
 
 impl Server {
     pub fn new(host: String, port: i32) -> Server {
-        Server {
-            host: host,
-            port: port,
-        }
+        Server { host, port }
     }
 }
 
 impl Reaction {
     pub fn new(trigger: String, action: String, occur: i64, log: String) -> Reaction {
         Reaction {
-            trigger: trigger,
-            action: action,
-            occur: occur,
-            log: log,
+            trigger,
+            action,
+            occur,
+            log,
         }
     }
 }
@@ -200,14 +201,14 @@ impl Config {
         reactions: Vec<Reaction>,
     ) -> Config {
         Config {
-            nickname: nickname,
-            username: username,
-            realname: realname,
-            usermode: usermode,
-            prefix: prefix,
-            admins: admins,
-            altnicks: altnicks,
-            reactions: reactions,
+            nickname,
+            username,
+            realname,
+            usermode,
+            prefix,
+            admins,
+            altnicks,
+            reactions,
         }
     }
 }
@@ -268,7 +269,7 @@ impl IRCStream {
         // shutting down
         thread::sleep(Duration::new(0, 200));
         self.send_quit(&quit_msg[..]);
-        println!("");
+        println!();
     }
 
     pub fn connect2(host: String, port: i32) -> Result<IRCStream, Error> {
@@ -299,7 +300,7 @@ impl IRCStream {
             host: server.host.clone(),
             port: server.port,
             is_authenticated: false,
-            config: config,
+            config,
         };
         Ok(socket)
     }
@@ -403,14 +404,14 @@ impl IRCStream {
 
     fn handle_line(&mut self, line: &str) -> Event {
         let event_priv_self = format!(":(.*) PRIVMSG {} :(.*)\r\n", self.config.nickname);
-        let event_priv_chan = format!(":(.*) PRIVMSG ((#|!)(\\S+)) :(.*)\r\n");
+        let event_priv_chan = ":(.*) PRIVMSG ((#|!)(\\S+)) :(.*)\r\n".to_string();
         let event_ping = "^PING\\s+:(.*)";
         let event_motd = ".*End of MOTD command.*";
         let event_nick = ":(.*) (.*) :Nickname is already in use.\r\n";
 
-        let re_motd = Regex::new(&event_motd[..]).unwrap();
-        let re_ping = Regex::new(&event_ping[..]).unwrap();
-        let re_nick = Regex::new(&event_nick[..]).unwrap();
+        let re_motd = Regex::new(event_motd).unwrap();
+        let re_ping = Regex::new(event_ping).unwrap();
+        let re_nick = Regex::new(event_nick).unwrap();
         let re_priv_self = Regex::new(&event_priv_self[..]).unwrap();
         let re_priv_chan = Regex::new(&event_priv_chan[..]).unwrap();
 
@@ -453,7 +454,7 @@ impl IRCStream {
             let msg = caps.get(2).map_or("", |m| m.as_str());
             let user = parse_hostmask(sender);
 
-            if msg.len() < 1 {
+            if msg.is_empty() {
                 debug(format!("PRIVMSG TOO SHORT {}", user.full));
                 return Event::PrivMsg;
             }
@@ -565,7 +566,7 @@ impl IRCStream {
                             "CHANMODE 1 {}|{}|{}|{}|{}",
                             sender, msg, channel, mode, arg
                         ));
-                        self.send_mode(channel, &rest[..]);
+                        self.send_mode(channel, rest);
                     } else {
                         debug(format!("CHANMODE ? {}|{}|{}", sender, msg, channel));
                         // send_privmsg(stream, channel, &say_msg2[..]);
@@ -613,23 +614,23 @@ impl IRCStream {
                     let command = "CLIENTINFO";
                     let reply = "VERSION TIME PING";
                     debug(format!("PRIVMSG CTCP:{} {}|{}", command, sender, reply));
-                    self.send_ctcp_reply(user.nick, command, &reply[..]);
+                    self.send_ctcp_reply(user.nick, command, reply);
 
-                    return Event::CTCP;
+                    return Event::Ctcp;
                 } else if payload == "VERSION" {
                     let command = "VERSION";
                     let reply = get_version();
                     debug(format!("PRIVMSG CTCP:{} {}|{}", command, sender, reply));
                     self.send_ctcp_reply(user.nick, command, &reply[..]);
 
-                    return Event::CTCP;
+                    return Event::Ctcp;
                 } else if payload == "TIME" {
                     let command = "TIME";
                     let reply = get_local_time();
                     debug(format!("PRIVMSG CTCP:{} {}|{}", command, sender, reply));
                     self.send_ctcp_reply(user.nick, command, &reply[..]);
 
-                    return Event::CTCP;
+                    return Event::Ctcp;
                 } else if payload.len() > 4 && &payload[0..4] == "PING" {
                     if payload.len() < 6 {
                         return Event::Unknown;
@@ -639,7 +640,7 @@ impl IRCStream {
                     debug(format!("PRIVMSG CTCP:{} {}|{}", command, sender, reply));
                     self.send_ctcp_reply(user.nick, command, reply);
 
-                    return Event::CTCP;
+                    return Event::Ctcp;
                 }
             } else {
                 debug(format!("PRIVMSG_FROM {}|{}", sender, msg));
@@ -653,7 +654,7 @@ impl IRCStream {
             let msg = caps.get(5).map_or("", |m| m.as_str());
             let user = parse_hostmask(sender);
 
-            if msg.len() < 1 {
+            if msg.is_empty() {
                 debug(format!("PRIVMSG TOO SHORT {}", sender));
                 return Event::PrivMsg;
             }
@@ -676,20 +677,20 @@ impl IRCStream {
                         matcher, new_action, msg
                     ));
 
-                    if reaction.log.len() > 0 {
+                    if !reaction.log.is_empty() {
                         let mut log_file = OpenOptions::new()
                             .write(true)
                             .append(true)
                             .open(reaction.log.clone())
                             .unwrap();
                         let mut log_msg = get_utc_time(false);
-                        log_msg.push_str(" ");
+                        log_msg.push(' ');
                         log_msg.push_str(channel);
-                        log_msg.push_str(" ");
+                        log_msg.push(' ');
                         log_msg.push_str(user.nick);
-                        log_msg.push_str(" ");
+                        log_msg.push(' ');
                         log_msg.push_str(msg);
-                        log_msg.push_str("\n");
+                        log_msg.push('\n');
                         debug(format!("Logging reaction: {}", log_msg));
                         match log_file.write(log_msg.as_bytes()) {
                             Err(f) => {
@@ -703,8 +704,11 @@ impl IRCStream {
                         let mut rng = rand::thread_rng();
                         num = rng.gen_range(0..=100);
                     }
-                    debug(format!("Reaction rnd: o: {}% roll: {}", reaction.occur, num));
-                    if num <= reaction.occur && reaction.action.len() > 0 {
+                    debug(format!(
+                        "Reaction rnd: o: {}% roll: {}",
+                        reaction.occur, num
+                    ));
+                    if num <= reaction.occur && !reaction.action.is_empty() {
                         if tpl_re.is_match(&reaction.action) {
                             let caps = tpl_re.captures(&reaction.action).unwrap();
                             let result = caps.get(1);

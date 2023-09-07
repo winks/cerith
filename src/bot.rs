@@ -228,16 +228,14 @@ fn parse_reactions(val: &Value) -> Vec<Reaction> {
                                 log = a.to_string();
                             }
                         }
-                        None => {
-                            match v.as_integer() {
-                                Some(a) => {
-                                    if k == "occur" {
-                                        occur = a
-                                    }
-                                },
-                                None => continue,
+                        None => match v.as_integer() {
+                            Some(a) => {
+                                if k == "occur" {
+                                    occur = a
+                                }
                             }
-                        }
+                            None => continue,
+                        },
                     }
                 }
                 if !trigger.is_empty() && (0..=100).contains(&occur) {
