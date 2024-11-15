@@ -1,6 +1,6 @@
 [package]
 name = "cerith"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Florian Anderiasch <fa@art-core.org>"]
 edition = "2018"
 
@@ -14,8 +14,8 @@ path = "src/bot.rs"
 
 [dependencies]
 getopts = "0.2.21"
-libc = "0.2.147"
-rand = "0.8"
-regex = "1.9.5"
-time = { version = "0.3", features = ["local-offset", "formatting", "macros"] }
-toml = "0.7.6"
+libc = "0.2.162"
+rand = "0.8.5"
+regex = "1.11.1"
+time = { version = "0.3.36", features = ["local-offset", "formatting", "macros"] }
+toml = "0.8.19"

@@ -189,6 +189,7 @@ impl fmt::Display for Server {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 impl Config {
     pub fn new(
         nickname: String,
@@ -679,7 +680,6 @@ impl IRCStream {
 
                     if !reaction.log.is_empty() {
                         let mut log_file = OpenOptions::new()
-                            .write(true)
                             .append(true)
                             .open(reaction.log.clone())
                             .unwrap();
